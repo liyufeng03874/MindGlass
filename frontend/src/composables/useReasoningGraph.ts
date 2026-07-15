@@ -22,21 +22,18 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
   const flowNodes = computed<Node[]>(() => {
     if (!graph.value) return []
 
-    const spacingX = 300
-    const spacingY = 180
+    const spacingY = 150  // 垂直间距
+    const centerX = 300   // 水平居中
     const nodes: Node[] = []
     const activeNodes = graph.value.nodes.filter(n => n.status !== 'discarded')
 
     activeNodes.forEach((node, idx) => {
-      const col = idx % 2
-      const row = Math.floor(idx / 2)
-
       const colorScheme = NODE_COLORS[node.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: node.type }
       const isBranch = node.status === 'branch'
 
       nodes.push({
         id: node.id,
-        position: { x: col * spacingX, y: row * spacingY },
+        position: { x: centerX - 100, y: idx * spacingY },  // 单列垂直，居中对齐
         data: {
           label: node.label,
           type: node.type,
@@ -80,6 +77,15 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           stroke: style.color,
           strokeWidth: 2,
           ...(style.dashed ? { strokeDasharray: '5,5' } : {}),
+        },
+        markerEnd: {
+          width: 12,
+          height: 12,
+          orient: 'auto',
+          refX: 6,
+          refY: 6,
+          color: style.color,
+          type: 'arrowclosed',
         },
       })
     })

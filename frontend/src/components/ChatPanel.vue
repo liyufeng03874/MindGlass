@@ -1,6 +1,12 @@
 <template>
   <div class="chat-panel">
     <div class="messages" ref="messagesRef">
+      <!-- 开场白 -->
+      <div v-if="messages.length === 0 && initialGreeting" class="message agent greeting">
+        <div class="avatar">🧠</div>
+        <div class="bubble greeting-bubble">{{ initialGreeting }}</div>
+      </div>
+
       <div
         v-for="(msg, idx) in messages"
         :key="idx"
@@ -30,11 +36,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 
 const props = defineProps<{
   messages: Array<{ role: 'user' | 'agent', content: string }>
   disabled?: boolean
+  initialGreeting?: string
 }>()
 
 const emit = defineEmits<{
@@ -42,8 +49,8 @@ const emit = defineEmits<{
 }>()
 
 const inputValue = ref('')
-const loading = ref(false)
 const messagesRef = ref<HTMLElement | null>(null)
+const loading = computed(() => props.disabled)
 
 watch(() => props.messages.length, async () => {
   await nextTick()
@@ -57,10 +64,6 @@ function handleSend() {
   if (!query) return
   emit('send', query)
   inputValue.value = ''
-  loading.value = true
-
-  // 当收到 agent 回复时关闭 loading
-  setTimeout(() => { loading.value = false }, 3000)
 }
 </script>
 
@@ -119,6 +122,21 @@ function handleSend() {
 .thinking {
   color: #999;
   font-style: italic;
+}
+
+.greeting {
+  animation: fadeIn 0.5s ease;
+}
+
+.greeting-bubble {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border-bottom-left-radius: 4px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .input-area {

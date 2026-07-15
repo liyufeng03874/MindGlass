@@ -4,11 +4,12 @@
       v-if="nodes.length > 0"
       :nodes="nodes"
       :edges="edges"
-      :default-viewport="{ x: 100, y: 80, zoom: 0.9 }"
+      :default-viewport="{ x: 0, y: 0, zoom: 1 }"
       fit-view-on-init
+      :min-zoom="0.5"
+      :max-zoom="2"
       class="flow-container"
-    >
-    </VueFlow>
+    />
 
     <div v-else class="empty-state">
       <div class="empty-icon">🧠</div>
@@ -41,6 +42,7 @@ const { flowNodes: nodes, flowEdges: edges } = useReasoningGraph(graphRef)
 .flow-container {
   width: 100%;
   height: 100%;
+  background: #fafafa;
 }
 
 .empty-state {

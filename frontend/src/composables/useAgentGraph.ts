@@ -12,6 +12,7 @@ export function useAgentGraph() {
   })
   const status = ref('')
   const connected = ref(false)
+  const isRunning = ref(false)
 
   const messages = ref<Array<{ role: 'user' | 'agent', content: string }>>([])
 
@@ -19,6 +20,7 @@ export function useAgentGraph() {
     messages.value.push({ role: 'user', content: query })
     status.value = '🤔 连接中...'
     connected.value = true
+    isRunning.value = true
 
     // 重置图状态
     graph.value = {
@@ -44,6 +46,7 @@ export function useAgentGraph() {
     eventSource.onerror = () => {
       status.value = '连接断开'
       connected.value = false
+      isRunning.value = false
       eventSource.close()
     }
   }
@@ -62,6 +65,7 @@ export function useAgentGraph() {
         if (node.type === 'Answer') {
           messages.value.push({ role: 'agent', content: node.data.output })
           status.value = '✅ 完成'
+          isRunning.value = false
         } else {
           status.value = `已生成 ${node.type} 节点`
         }
@@ -83,6 +87,7 @@ export function useAgentGraph() {
 
       case 'run_complete': {
         connected.value = false
+        isRunning.value = false
         if (event.data.graph) {
           graph.value = event.data.graph as ReasoningGraph
         }
@@ -92,6 +97,7 @@ export function useAgentGraph() {
       case 'error':
         status.value = `❌ 错误: ${event.data.message}`
         connected.value = false
+        isRunning.value = false
         break
     }
   }
@@ -100,6 +106,7 @@ export function useAgentGraph() {
     graph,
     status,
     connected,
+    isRunning,
     messages,
     sendMessage,
   }
