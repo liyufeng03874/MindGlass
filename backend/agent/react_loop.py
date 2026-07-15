@@ -6,9 +6,10 @@
 3. 生成 Answer
 
 每个步骤生成 Node 对象，通过 SSE 推送事件。
-支持截断重放：从任意 step 截断，保留历史分支。
+支持截断重放：从任意 ToolCall 节点截断，保留历史分支，重新执行后续所有步骤。
 """
 
+import asyncio
 import uuid
 import json
 from typing import AsyncGenerator, Optional
@@ -17,12 +18,17 @@ from datetime import datetime
 from state.store import ReasoningGraphStore
 from state.models import ReasoningNode, ReasoningEdge
 from agent.planner import plan
-from agent.tools import execute_tool, list_tools
+from agent.tools import execute_tool
 from agent.answerer import generate_answer
+
+# 超时设置（秒）
+TOOL_TIMEOUT = 30
+LLM_TIMEOUT = 60
 
 
 def _make_node_id(step_index: int, node_type: str) -> str:
-    return f"{node_type.lower()}_{step_index}"
+    """生成全局唯一节点 ID：类型_stepIndex_uuid前缀"""
+    return f"{node_type.lower()}_{step_index}_{uuid.uuid4().hex[:6]}"
 
 
 class ReactLoop:
@@ -33,52 +39,52 @@ class ReactLoop:
         self.run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.query = ""
         self.step_index = 0
+        self._cached_steps: list[dict] = []
+        self._cached_plan_info: str = ""
 
     def _emit(self, event_type: str, data: dict) -> str:
         """格式化 SSE 事件"""
         return f"data: {json.dumps({'type': event_type, 'data': data}, ensure_ascii=False)}\n\n"
 
-    async def run(self, query: str) -> AsyncGenerator[str, None]:
-        """执行完整的 ReAct 循环，通过 SSE 推送事件"""
-        self.query = query
-        self.store.reset()
-        self.store.meta.run_id = self.run_id
-        self.store.meta.query = query
+    def _prev_node_id(self) -> Optional[str]:
+        """获取最新非 discarded 节点的 ID（用于连边）"""
+        latest = self.store.get_latest_node()
+        return latest.id if latest else None
 
-        # Step 0: Plan
-        yield self._emit("status", {"message": "🤔 正在规划..."})
-        plan_result = await plan(query)
+    def _add_edge(self, from_id: str, to_id: str, edge_type: str = "Normal") -> None:
+        """添加边"""
+        self.store.add_edge(ReasoningEdge(from_id=from_id, to_id=to_id, edge_type=edge_type))
 
-        plan_node = ReasoningNode(
-            node_id=_make_node_id(self.step_index, "Plan"),
-            node_type="Plan",
-            data={
-                "input": query,
-                "output": plan_result.get("thought", ""),
-                "steps": plan_result.get("steps", []),
-            },
-            status="done",
-            step_index=self.step_index,
-            label=f"规划 ({len(plan_result.get('steps', []))} 步)",
-        )
-        self.store.add_node(plan_node)
-        yield self._emit("node_complete", {"node": plan_node.to_dict()})
+    async def _safe_tool_call(self, tool_name: str, params: dict) -> tuple[bool, dict]:
+        """安全执行工具，返回 (success, result)"""
+        try:
+            result = await asyncio.wait_for(
+                execute_tool(tool_name, params),
+                timeout=TOOL_TIMEOUT,
+            )
+            return True, result
+        except asyncio.TimeoutError:
+            return False, {"error": f"工具 {tool_name} 执行超时（{TOOL_TIMEOUT}s）"}
+        except Exception as e:
+            return False, {"error": f"工具执行失败: {str(e)}"}
 
-        self.step_index += 1
-
-        # 循环执行步骤
-        steps = plan_result.get("steps", [])
-        observations = []
-
-        for i, step in enumerate(steps):
+    async def _run_steps(self, steps: list[dict], start_index: int, observations: list) -> AsyncGenerator[str, None]:
+        """
+        从 start_index 开始执行 steps 循环，包含 ToolCall → Observe。
+        用于 run() 和 retry_from() 复用。
+        """
+        for i in range(start_index, len(steps)):
+            step = steps[i]
             tool_name = step.get("tool", "search")
             tool_params = step.get("params", {})
             description = step.get("description", "")
 
+            # 先获取上一个节点 ID（在 add_node 之前！）
+            prev_id = self._prev_node_id()
+
             # ToolCall
             yield self._emit("status", {"message": f"🔧 正在执行: {tool_name}"})
-
-            tool_result = await execute_tool(tool_name, tool_params)
+            success, tool_result = await self._safe_tool_call(tool_name, tool_params)
 
             tc_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "ToolCall"),
@@ -89,24 +95,19 @@ class ReactLoop:
                     "result": tool_result,
                     "description": description,
                 },
-                status="done",
+                status="done" if success else "error",
                 step_index=self.step_index,
                 label=f"{tool_name}",
             )
             self.store.add_node(tc_node)
+            if prev_id:
+                self._add_edge(prev_id, tc_node.id)
             yield self._emit("node_complete", {"node": tc_node.to_dict()})
 
-            # 添加边
-            self.store.add_edge(ReasoningEdge(
-                from_id=_make_node_id(self.step_index - 1 if self.step_index > 0 else 0,
-                                      "Plan" if self.step_index == 1 else "ToolCall"),
-                to_id=tc_node.id,
-                edge_type="Normal",
-            ))
-
             self.step_index += 1
+            prev_id = tc_node.id  # 现在上一个节点是 ToolCall
 
-            # Observe
+            # Observe（即使工具失败也生成观察节点，方便调试）
             yield self._emit("status", {"message": "📡 收集结果..."})
 
             obs_node = ReasoningNode(
@@ -115,28 +116,35 @@ class ReactLoop:
                 data={
                     "source": tc_node.id,
                     "tool": tool_name,
-                    "result_summary": str(tool_result)[:200] if isinstance(tool_result, dict) else str(tool_result)[:200],
+                    "result_summary": str(tool_result)[:200],
                 },
                 status="done",
                 step_index=self.step_index,
                 label="观察结果",
             )
             self.store.add_node(obs_node)
+            self._add_edge(prev_id, obs_node.id)
             yield self._emit("node_complete", {"node": obs_node.to_dict()})
-
-            # 添加边
-            self.store.add_edge(ReasoningEdge(
-                from_id=tc_node.id,
-                to_id=obs_node.id,
-                edge_type="Normal",
-            ))
 
             observations.append(tool_result)
             self.step_index += 1
 
-        # 生成最终回答
+    async def _generate_answer(self, query: str, observations: list, plan_info: str = "") -> AsyncGenerator[str, None]:
+        """生成最终回答"""
         yield self._emit("status", {"message": "✍️ 正在生成回答..."})
-        answer = await generate_answer(query, observations)
+
+        # 传入完整上下文：query + 规划思路 + observations
+        context = f"规划思路：{plan_info}" if plan_info else ""
+        try:
+            answer = await asyncio.wait_for(
+                generate_answer(query, observations, context),
+                timeout=LLM_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            answer = f"回答生成超时（{LLM_TIMEOUT}s），请重试。"
+
+        # 先获取上一个节点 ID
+        prev_id = self._prev_node_id()
 
         ans_node = ReasoningNode(
             node_id=_make_node_id(self.step_index, "Answer"),
@@ -151,85 +159,112 @@ class ReactLoop:
             label="最终回答",
         )
         self.store.add_node(ans_node)
-
-        # 添加最后一条边
-        last_obs = self.store.get_latest_node("Observe")
-        if last_obs:
-            self.store.add_edge(ReasoningEdge(
-                from_id=last_obs.id,
-                to_id=ans_node.id,
-                edge_type="Normal",
-            ))
+        if prev_id:
+            self._add_edge(prev_id, ans_node.id)
 
         yield self._emit("node_complete", {"node": ans_node.to_dict()})
         yield self._emit("run_complete", {"graph": self.store.to_dict()})
 
+    async def run(self, query: str) -> AsyncGenerator[str, None]:
+        """执行完整的 ReAct 循环"""
+        self.query = query
+        self.store.reset()
+        self.store.meta.run_id = self.run_id
+        self.store.meta.query = query
+
+        # Step 0: Plan
+        yield self._emit("status", {"message": "🤔 正在规划..."})
+        plan_result = await plan(query)
+        steps = plan_result.get("steps", [])
+        plan_info = plan_result.get("thought", "")
+
+        plan_node = ReasoningNode(
+            node_id=_make_node_id(self.step_index, "Plan"),
+            node_type="Plan",
+            data={
+                "input": query,
+                "output": plan_info,
+                "steps": steps,
+            },
+            status="done",
+            step_index=self.step_index,
+            label=f"规划 ({len(steps)} 步)",
+        )
+        self.store.add_node(plan_node)
+        yield self._emit("node_complete", {"node": plan_node.to_dict()})
+
+        self.step_index += 1
+
+        # 保存 steps 到 meta，供 retry_from 复用
+        self.store.meta.total_steps = len(steps)
+        self._cached_steps = steps
+        self._cached_plan_info = plan_info
+
+        observations: list = []
+        async for event in self._run_steps(steps, 0, observations):
+            yield event
+
+        async for event in self._generate_answer(query, observations, plan_info):
+            yield event
+
     async def retry_from(self, step_index: int, edited_data: Optional[dict] = None) -> AsyncGenerator[str, None]:
-        """从指定 step 截断并重试"""
+        """
+        从指定 step 截断并重试。
+        自动重新执行后续所有步骤（当前 ToolCall → Observe → ... → Answer）。
+        """
         # 截断
         discarded_ids = self.store.truncate_from(step_index)
         if discarded_ids:
-            branch_id = self.store.create_branch(
-                discarded_from=f"step_{step_index}",
+            self.store.create_branch(
+                discarded_from=f"truncated_at_step_{step_index}",
                 discarded_node_ids=discarded_ids,
                 reason="用户修改后重试",
             )
-        else:
-            branch_id = None
 
         self.step_index = step_index
 
-        # 找到被编辑节点之前的最后一个节点，用来连边
-        prev_node = None
-        for node in reversed(self.store.nodes):
-            if node.step_index < step_index and node.status != "discarded":
-                prev_node = node
-                break
-
-        # 重新执行
+        # 找到被编辑的节点类型
         node = self.store.get_node_by_index(step_index)
         if not node:
             yield self._emit("error", {"message": f"未找到 step {step_index}"})
             return
 
         if node.type == "ToolCall":
-            # 如果是编辑后的，用新参数
+            # 使用编辑后的参数（如果有）
             params = edited_data.get("params", node.data.get("params", {})) if edited_data else node.data.get("params", {})
             tool_name = edited_data.get("tool", node.data.get("tool", "search")) if edited_data else node.data.get("tool", "search")
 
-            yield self._emit("status", {"message": f"🔧 正在重试: {tool_name}"})
-            tool_result = await execute_tool(tool_name, params)
+            # 找到当前 step 在 steps 列表中的位置
+            steps = self._cached_steps
+            matched_idx = None
+            for i, s in enumerate(steps):
+                if s.get("tool") == tool_name and s.get("params") == node.data.get("params"):
+                    matched_idx = i
+                    break
+            if matched_idx is None:
+                # fallback: 根据 step_index 推算
+                matched_idx = (step_index - 1) // 2
 
-            # 创建新节点（分支）
-            new_node = ReasoningNode(
-                node_id=f"{node.type.lower()}_{step_index}_v2",
-                node_type="ToolCall",
-                data={
-                    "tool": tool_name,
-                    "params": params,
-                    "result": tool_result,
-                    "description": f"重试 (原: step_{step_index})",
-                },
-                status="branch",
-                step_index=step_index,
-                label=f"{tool_name} (重试)",
-            )
-            self.store.add_node(new_node)
+            # 从当前 step 开始重新执行后续步骤
+            observations: list = []
+            # 先收集截断前的 observations（用于给 generate_answer 完整上下文）
+            for n in self.store.nodes:
+                if n.type == "Observe" and n.status == "done" and n.step_index < step_index:
+                    # 从对应的 ToolCall 节点获取完整结果
+                    for tc in self.store.nodes:
+                        if tc.type == "ToolCall" and tc.id == n.data.get("source") and tc.status == "done":
+                            observations.append(tc.data.get("result", {}))
 
-            if prev_node:
-                self.store.add_edge(ReasoningEdge(
-                    from_id=prev_node.id,
-                    to_id=new_node.id,
-                    edge_type="Branch",
-                ))
+            # 从 matched_idx 开始重新执行
+            async for event in self._run_steps(steps, matched_idx, observations):
+                yield event
 
-            yield self._emit("node_complete", {"node": new_node.to_dict()})
-            yield self._emit("run_complete", {"graph": self.store.to_dict()})
+            async for event in self._generate_answer(self.query, observations, self._cached_plan_info):
+                yield event
 
         elif node.type == "Plan":
-            yield self._emit("error", {"message": "Plan 节点重试暂不支持"})
+            yield self._emit("error", {"message": "Plan 节点重试暂不支持，请编辑 ToolCall 节点"})
             yield self._emit("run_complete", {"graph": self.store.to_dict()})
-
         else:
-            yield self._emit("error", {"message": f"不支持重试 {node.type} 节点"})
+            yield self._emit("error", {"message": f"不支持重试 {node.type} 节点，请从 ToolCall 节点重试"})
             yield self._emit("run_complete", {"graph": self.store.to_dict()})

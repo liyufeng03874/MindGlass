@@ -2,7 +2,7 @@
 
 from agent.llm import generate
 
-ANSWER_SYSTEM_PROMPT = """你是一个专业的 AI 助手。根据用户的问题和收集到的信息，给出准确、完整、有条理的回答。
+ANSWER_SYSTEM_PROMPT = """你是一个专业的 AI 助手。根据用户的问题、规划思路和收集到的信息，给出准确、完整、有条理的回答。
 
 回答要求：
 1. 基于提供的信息回答，不要编造
@@ -11,12 +11,18 @@ ANSWER_SYSTEM_PROMPT = """你是一个专业的 AI 助手。根据用户的问�
 """
 
 
-async def generate_answer(query: str, observations: list[dict]) -> str:
+async def generate_answer(query: str, observations: list[dict], plan_context: str = "") -> str:
     """
-    基于所有观察结果，生成最终回答
+    基于规划思路和所有观察结果，生成最终回答
     """
     # 构建上下文
     context_parts = []
+
+    # 1. 规划思路（如果有）
+    if plan_context:
+        context_parts.append(f"## 规划思路\n{plan_context}")
+
+    # 2. 观察结果
     for i, obs in enumerate(observations):
         context_parts.append(f"## 观察 {i+1}")
         if "result" in obs:

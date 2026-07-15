@@ -5,14 +5,11 @@ import json
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from sse_starlette.sse import EventSourceResponse
-
 from dotenv import load_dotenv
 load_dotenv()
 
 from state.store import ReasoningGraphStore
 from agent.react_loop import ReactLoop
-from agent.tools import list_tools
 
 app = FastAPI(title="MindGlass", description="可观测多步推理 Agent")
 

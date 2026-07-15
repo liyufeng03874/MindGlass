@@ -1,21 +1,30 @@
 """MindGlass 数据模型"""
 
-from typing import Optional, Literal
-
-# 节点类型
-NodeType = Literal["Plan", "ToolCall", "Observe", "Answer"]
-NodeStatus = Literal["done", "current", "pending", "error", "discarded", "branch"]
-EdgeType = Literal["Normal", "Retry", "Fallback", "Branch"]
+from enum import Enum
+from typing import Optional
 
 
-class NodeData:
-    """节点数据 payload"""
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+class NodeType(str, Enum):
+    Plan = "Plan"
+    ToolCall = "ToolCall"
+    Observe = "Observe"
+    Answer = "Answer"
 
-    def to_dict(self):
-        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+
+class NodeStatus(str, Enum):
+    Done = "done"
+    Current = "current"
+    Pending = "pending"
+    Error = "error"
+    Discarded = "discarded"
+    Branch = "branch"
+
+
+class EdgeType(str, Enum):
+    Normal = "Normal"
+    Retry = "Retry"
+    Fallback = "Fallback"
+    Branch = "Branch"
 
 
 class ReasoningNode:
@@ -23,9 +32,9 @@ class ReasoningNode:
     def __init__(
         self,
         node_id: str,
-        node_type: NodeType,
+        node_type: str,
         data: dict,
-        status: NodeStatus = "pending",
+        status: str = "pending",
         step_index: int = 0,
         branch_id: Optional[str] = None,
         label: str = "",
@@ -38,7 +47,7 @@ class ReasoningNode:
         self.branch_id = branch_id
         self.label = label
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "id": self.id,
             "type": self.type,
@@ -52,12 +61,12 @@ class ReasoningNode:
 
 class ReasoningEdge:
     """节点之间的边"""
-    def __init__(self, from_id: str, to_id: str, edge_type: EdgeType = "Normal"):
+    def __init__(self, from_id: str, to_id: str, edge_type: str = "Normal"):
         self.from_id = from_id
         self.to_id = to_id
         self.type = edge_type
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "from": self.from_id,
             "to": self.to_id,
@@ -73,7 +82,7 @@ class BranchRecord:
         self.discarded_node_ids = discarded_node_ids
         self.reason = reason
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "id": self.id,
             "discarded_from": self.discarded_from,
@@ -85,12 +94,12 @@ class BranchRecord:
 class ReasoningMeta:
     """运行元信息"""
     def __init__(self, query: str = "", run_id: str = ""):
-        self.current_step_index = 0
-        self.total_steps = 0
+        self.current_step_index: int = 0
+        self.total_steps: int = 0
         self.query = query
         self.run_id = run_id
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "current_step_index": self.current_step_index,
             "total_steps": self.total_steps,
