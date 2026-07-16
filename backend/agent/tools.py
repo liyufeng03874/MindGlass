@@ -4,6 +4,8 @@ import httpx
 from typing import Callable, Optional
 from dotenv import load_dotenv
 import os
+import re
+from bs4 import BeautifulSoup
 
 load_dotenv()
 
@@ -45,7 +47,7 @@ def list_tools() -> list[dict]:
 
 @register_tool(
     name="search",
-    description="网络搜索，返回搜索结果摘要",
+    description="网络搜索，返回搜索结果摘要（使用 Tavily AI 搜索引擎）",
     params=[
         {"name": "query", "type": "string", "description": "搜索关键词"},
         {"name": "top_k", "type": "integer", "description": "返回结果数量", "default": 5},
@@ -53,23 +55,46 @@ def list_tools() -> list[dict]:
 )
 async def tool_search(query: str, top_k: int = 5) -> dict:
     """
-    网络搜索工具（使用 web_fetch 模拟，实际可接 Tavily/Serper/Google API）
+    网络搜索工具（使用 Tavily AI 搜索引擎）
     返回结构化搜索结果
     """
-    # 模拟搜索结果 —— 实际对接真实 API 时替换
-    results = [
-        {
-            "title": f"搜索结果 {i} - {query}",
-            "url": f"https://example.com/result_{i}",
-            "snippet": f"这是关于「{query}」的第 {i} 条搜索结果摘要信息...",
-        }
-        for i in range(1, min(top_k + 1, 6))
-    ]
-    return {
-        "query": query,
-        "results": results,
-        "count": len(results),
-    }
+    import os
+    tavily_key = os.getenv("TAVILY_API_KEY")
+    if not tavily_key:
+        return {"query": query, "error": "TAVILY_API_KEY not configured", "results": []}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "query": query,
+                    "search_depth": "basic",
+                    "max_results": top_k,
+                    "include_answer": True,
+                    "include_images": False,
+                },
+                headers={"Authorization": f"Bearer {tavily_key}", "Content-Type": "application/json"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                results = []
+                for r in data.get("results", []):
+                    results.append({
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "snippet": r.get("content", ""),
+                    })
+                return {
+                    "query": query,
+                    "answer": data.get("answer", ""),
+                    "results": results,
+                    "count": len(results),
+                }
+            else:
+                return {"query": query, "error": f"Tavily API error: {resp.status_code} - {resp.text}", "results": []}
+    except Exception as e:
+        return {"query": query, "error": str(e), "results": []}
 
 
 @register_tool(
