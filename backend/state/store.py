@@ -44,12 +44,21 @@ class ReasoningGraphStore:
         return max(candidates, key=lambda n: n.step_index) if candidates else None
 
     def truncate_from(self, step_index: int) -> list[str]:
-        """从 step_index 开始截断（含该节点），返回被截断的节点 id"""
+        """从 step_index 开始截断（含该节点），标记为 branch 以保留历史。
+        同时将涉及这些节点的旧边标记为 Branch 类型。
+        返回被截断的节点 id。"""
         discarded_ids = []
         for node in self.nodes:
-            if node.step_index >= step_index and node.status not in ("discarded", "branch"):
-                node.status = "discarded"
+            if node.step_index >= step_index and node.status not in ("branch",):
+                node.status = "branch"
                 discarded_ids.append(node.id)
+
+        # 标记旧边为 Branch：只要 from 或 to 是 branch 节点，就标记
+        branch_ids = set(discarded_ids)
+        for edge in self.edges:
+            if edge.from_id in branch_ids or edge.to_id in branch_ids:
+                edge.type = "Branch"
+
         return discarded_ids
 
     def create_branch(self, discarded_from: str, discarded_node_ids: list, reason: str = "") -> str:

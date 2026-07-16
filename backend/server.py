@@ -78,6 +78,53 @@ def retry_from(request: dict):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.post("/api/load-demo")
+def load_demo():
+    """加载 demo_6.txt 作为测试数据"""
+    import os
+    demo_path = os.path.join(os.path.dirname(__file__), "docs", "demo_6.txt")
+    if not os.path.exists(demo_path):
+        raise HTTPException(status_code=404, detail="demo_6.txt 不存在")
+
+    with open(demo_path, "r", encoding="utf-8") as f:
+        content = f.read().strip()
+
+    try:
+        # 解析 JSON 格式（可能是嵌套的 {"type": "run_complete", "data": {"graph": {...}}}）
+        parsed = json.loads(content)
+        # 提取 graph 数据
+        if "data" in parsed and "graph" in parsed["data"]:
+            graph_data = parsed["data"]["graph"]
+        elif "nodes" in parsed and "edges" in parsed:
+            graph_data = parsed
+        else:
+            graph_data = parsed
+
+        # 重置 store 并加载数据
+        _store.reset()
+        for node in graph_data.get("nodes", []):
+            from state.models import ReasoningNode
+            _store.add_node(ReasoningNode(
+                node_id=node["id"],
+                node_type=node["type"],
+                data=node["data"],
+                status=node["status"],
+                step_index=node["step_index"],
+                label=node.get("label", node["type"]),
+            ))
+        for edge in graph_data.get("edges", []):
+            from state.models import ReasoningEdge
+            _store.add_edge(ReasoningEdge(
+                from_id=edge["from"],
+                to_id=edge["to"],
+                edge_type=edge.get("type", "Normal"),
+            ))
+
+        return {"status": "ok", "message": "已加载 demo_6 测试数据", "node_count": len(graph_data.get("nodes", []))}
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"JSON 解析失败：{str(e)}")
+
+
 if __name__ == "__main__":
     port = int(os.getenv("MINDGLASS_PORT", "8002"))
     import uvicorn

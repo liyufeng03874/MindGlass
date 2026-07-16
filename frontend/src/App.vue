@@ -7,7 +7,14 @@
         <span :class="['status-dot', { active: connected }]"></span>
         <span>{{ status || '就绪' }}</span>
         <button
-          v-if="graph.nodes.length > 0"
+          v-if="graph.nodes.length === 0"
+          class="toggle-graph-btn"
+          @click="loadTestData"
+        >
+          📦 加载测试数据
+        </button>
+        <button
+          v-else
           class="toggle-graph-btn"
           @click="showGraph = !showGraph"
         >
@@ -27,7 +34,7 @@
       </div>
       <transition name="slide">
         <div v-if="showGraph" class="right-panel">
-          <ReasoningGraph :graph="graph" />
+          <ReasoningGraph :graph="graph" :isRunning="isRunning" @retry="onRetry" />
         </div>
       </transition>
     </main>
@@ -40,17 +47,40 @@ import ChatPanel from './components/ChatPanel.vue'
 import ReasoningGraph from './components/ReasoningGraph.vue'
 import { useAgentGraph } from './composables/useAgentGraph'
 
-const { graph, status, connected, messages, isRunning, sendMessage } = useAgentGraph()
+const { graph, status, connected, messages, isRunning, sendMessage, retryFrom } = useAgentGraph()
 
 const showGraph = ref(false)
 const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解复杂问题、调用工具搜索、生成结构化回答。试试问我点什么吧～'
 
-function onSend(query: string) {
+  function onSend(query: string) {
   sendMessage(query)
   // 第一次发送消息时，展示右侧推理面板
   if (graph.value.nodes.length === 0 && !showGraph.value) {
     showGraph.value = true
   }
+}
+
+function onRetry(stepIndex: number, editedData: Record<string, any>) {
+  retryFrom(stepIndex, editedData)
+}
+
+function loadTestData() {
+  // 调用后端加载 demo_6 数据
+  fetch('http://localhost:8002/api/load-demo', { method: 'POST' })
+    .then(res => res.json())
+    .then(() => {
+      // 加载完成后获取图数据
+      return fetch('http://localhost:8002/api/graph')
+    })
+    .then(res => res.json())
+    .then(data => {
+      graph.value = data
+      showGraph.value = true
+      status.value = '📦 已加载 demo_6 测试数据'
+    })
+    .catch(() => {
+      status.value = '❌ 加载测试数据失败'
+    })
 }
 </script>
 

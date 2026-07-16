@@ -47,9 +47,11 @@ class ReactLoop:
         return f"data: {json.dumps({'type': event_type, 'data': data}, ensure_ascii=False)}\n\n"
 
     def _prev_node_id(self) -> Optional[str]:
-        """获取最新非 discarded 节点的 ID（用于连边）"""
-        latest = self.store.get_latest_node()
-        return latest.id if latest else None
+        """获取最新非 discarded、非 branch 节点的 ID（用于连边）"""
+        for node in reversed(self.store.nodes):
+            if node.status not in ("discarded", "branch"):
+                return node.id
+        return None
 
     def _add_edge(self, from_id: str, to_id: str, edge_type: str = "Normal") -> None:
         """添加边"""
@@ -210,61 +212,159 @@ class ReactLoop:
     async def retry_from(self, step_index: int, edited_data: Optional[dict] = None) -> AsyncGenerator[str, None]:
         """
         从指定 step 截断并重试。
-        自动重新执行后续所有步骤（当前 ToolCall → Observe → ... → Answer）。
+        支持编辑 ToolCall 的 params/tool 后，截断后续所有节点，用新数据重新执行。
         """
-        # 截断
+        yield self._emit("status", {"message": "🔄 截断中..."})
+
+        # 1. 截断指定 step 及之后的节点
         discarded_ids = self.store.truncate_from(step_index)
         if discarded_ids:
             self.store.create_branch(
-                discarded_from=f"truncated_at_step_{step_index}",
+                discarded_from=f"step_{step_index}",
                 discarded_node_ids=discarded_ids,
-                reason="用户修改后重试",
+                reason="用户编辑后重试",
             )
 
-        self.step_index = step_index
-
-        # 找到被编辑的节点类型
+        # 找到被截断处的节点（即要被编辑的节点）
         node = self.store.get_node_by_index(step_index)
         if not node:
             yield self._emit("error", {"message": f"未找到 step {step_index}"})
             return
 
+        self.step_index = step_index
+
+        # 2. 根据节点类型处理
         if node.type == "ToolCall":
-            # 使用编辑后的参数（如果有）
-            params = edited_data.get("params", node.data.get("params", {})) if edited_data else node.data.get("params", {})
-            tool_name = edited_data.get("tool", node.data.get("tool", "search")) if edited_data else node.data.get("tool", "search")
+            # 使用编辑后的数据（如果有），否则复用原节点的 params/tool
+            effective_tool = node.data.get("tool", "search")
+            effective_params = node.data.get("params", {})
+            effective_description = node.data.get("description", "")
 
-            # 找到当前 step 在 steps 列表中的位置
-            steps = self._cached_steps
-            matched_idx = None
-            for i, s in enumerate(steps):
-                if s.get("tool") == tool_name and s.get("params") == node.data.get("params"):
-                    matched_idx = i
-                    break
-            if matched_idx is None:
-                # fallback: 根据 step_index 推算
-                matched_idx = (step_index - 1) // 2
+            if edited_data:
+                if "params" in edited_data:
+                    effective_params = edited_data["params"]
+                if "tool" in edited_data:
+                    effective_tool = edited_data["tool"]
+                yield self._emit("status", {"message": f"📝 已更新参数: {json.dumps(effective_params, ensure_ascii=False)}"})
 
-            # 从当前 step 开始重新执行后续步骤
+            # 收集截断前已有的 observations（完整结果）
             observations: list = []
-            # 先收集截断前的 observations（用于给 generate_answer 完整上下文）
             for n in self.store.nodes:
                 if n.type == "Observe" and n.status == "done" and n.step_index < step_index:
-                    # 从对应的 ToolCall 节点获取完整结果
+                    source_id = n.data.get("source")
                     for tc in self.store.nodes:
-                        if tc.type == "ToolCall" and tc.id == n.data.get("source") and tc.status == "done":
+                        if tc.type == "ToolCall" and tc.id == source_id and tc.status == "done":
                             observations.append(tc.data.get("result", {}))
 
-            # 从 matched_idx 开始重新执行
-            async for event in self._run_steps(steps, matched_idx, observations):
-                yield event
+            # 截断前最后一个活跃节点（step_index < step_index 的最后一个非 branch 节点）
+            prev_id = None
+            for n in reversed(self.store.nodes):
+                if n.status not in ("discarded", "branch") and n.step_index < step_index:
+                    prev_id = n.id
+                    break
 
+            yield self._emit("status", {"message": f"🔧 重新执行: {effective_tool}"})
+            success, tool_result = await self._safe_tool_call(effective_tool, effective_params)
+
+            tc_node = ReasoningNode(
+                node_id=_make_node_id(self.step_index, "ToolCall"),
+                node_type="ToolCall",
+                data={
+                    "tool": effective_tool,
+                    "params": effective_params,
+                    "result": tool_result,
+                    "description": effective_description,
+                },
+                status="done" if success else "error",
+                step_index=self.step_index,
+                label=f"{effective_tool}（重试）",
+            )
+            self.store.add_node(tc_node)
+            if prev_id:
+                self._add_edge(prev_id, tc_node.id)
+            yield self._emit("node_complete", {"node": tc_node.to_dict(), "graph": self.store.to_dict()})
+
+            # 生成新的 Observe 节点
+            self.step_index += 1
+            prev_id = tc_node.id
+
+            obs_node = ReasoningNode(
+                node_id=_make_node_id(self.step_index, "Observe"),
+                node_type="Observe",
+                data={
+                    "source": tc_node.id,
+                    "tool": effective_tool,
+                    "result_summary": str(tool_result)[:200],
+                },
+                status="done",
+                step_index=self.step_index,
+                label="观察结果",
+            )
+            self.store.add_node(obs_node)
+            self._add_edge(prev_id, obs_node.id)
+            yield self._emit("node_complete", {"node": obs_node.to_dict()})
+
+            observations.append(tool_result)
+            self.step_index += 1
+
+            # 继续执行后续 steps（从当前 step 的下一个开始）
+            # 推算在 steps 列表中的位置：step_index=1 对应 steps[0], step_index=3 对应 steps[1], ...
+            current_tool_index = (step_index - 1) // 2
+            remaining_steps = self._cached_steps[current_tool_index + 1:] if current_tool_index + 1 < len(self._cached_steps) else []
+
+            if remaining_steps:
+                async for event in self._run_steps(remaining_steps, 0, observations):
+                    yield event
+            else:
+                yield self._emit("status", {"message": "✍️ 正在生成回答..."})
+
+            # 生成最终回答
             async for event in self._generate_answer(self.query, observations, self._cached_plan_info):
                 yield event
 
         elif node.type == "Plan":
-            yield self._emit("error", {"message": "Plan 节点重试暂不支持，请编辑 ToolCall 节点"})
-            yield self._emit("run_complete", {"graph": self.store.to_dict()})
+            # Plan 编辑：更新规划思路，重新生成 steps
+            if edited_data and "output" in edited_data:
+                node.data["output"] = edited_data["output"]
+                if "steps" in edited_data:
+                    self._cached_steps = edited_data["steps"]
+                    self.store.meta.total_steps = len(edited_data["steps"])
+                    node.label = f"规划 ({len(edited_data['steps'])} 步)"
+                node.status = "done"
+                yield self._emit("node_complete", {"node": node.to_dict()})
+                yield self._emit("status", {"message": "📝 已更新规划"})
+
+            observations = []
+            async for event in self._run_steps(self._cached_steps, 0, observations):
+                yield event
+            async for event in self._generate_answer(self.query, observations, self._cached_plan_info):
+                yield event
+
+        elif node.type == "Observe":
+            # Observe 编辑：手动覆盖观察结果，继续后续步骤
+            if edited_data and "result_summary" in edited_data:
+                node.data["result_summary"] = edited_data["result_summary"]
+                node.status = "done"
+                yield self._emit("node_complete", {"node": node.to_dict()})
+
+            # 从后续 ToolCall 继续
+            current_tool_index = (step_index) // 2
+            remaining_steps = self._cached_steps[current_tool_index:]
+
+            observations = []
+            for n in self.store.nodes:
+                if n.type == "Observe" and n.status == "done" and n.step_index < step_index:
+                    source_id = n.data.get("source")
+                    for tc in self.store.nodes:
+                        if tc.type == "ToolCall" and tc.id == source_id and tc.status == "done":
+                            observations.append(tc.data.get("result", {}))
+
+            if remaining_steps:
+                async for event in self._run_steps(remaining_steps, 0, observations):
+                    yield event
+            async for event in self._generate_answer(self.query, observations, self._cached_plan_info):
+                yield event
+
         else:
             yield self._emit("error", {"message": f"不支持重试 {node.type} 节点，请从 ToolCall 节点重试"})
             yield self._emit("run_complete", {"graph": self.store.to_dict()})

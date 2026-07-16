@@ -22,18 +22,33 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
   const flowNodes = computed<Node[]>(() => {
     if (!graph.value) return []
 
-    const spacingY = 150  // 垂直间距
+    const spacingY = 150  // 垂直间距（按 step_index）
     const centerX = 300   // 水平居中
+    const branchOffsetX = -120  // branch 路径左偏移
+    const newBranchOffsetX = 120  // 新路径右偏移
     const nodes: Node[] = []
     const activeNodes = graph.value.nodes.filter(n => n.status !== 'discarded')
 
-    activeNodes.forEach((node, idx) => {
+    // 找到分叉点：第一个 branch 节点的 step_index
+    const firstBranchStep = activeNodes.find(n => n.status === 'branch')?.step_index
+    // 新路径的起点：第一个非 branch 但 step_index >= firstBranchStep 的节点
+    const newBranchStartStep = firstBranchStep !== undefined
+      ? activeNodes.find(n => n.status !== 'branch' && n.step_index >= firstBranchStep)?.step_index
+      : undefined
+
+    activeNodes.forEach((node) => {
       const colorScheme = NODE_COLORS[node.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: node.type }
       const isBranch = node.status === 'branch'
+      const isNewBranch = newBranchStartStep !== undefined && node.step_index >= newBranchStartStep && !isBranch
+
+      // 分叉布局：branch 路径左偏，新路径右偏
+      let xOffset = 0
+      if (isBranch) xOffset = branchOffsetX
+      else if (isNewBranch) xOffset = newBranchOffsetX
 
       nodes.push({
         id: node.id,
-        position: { x: centerX - 100, y: idx * spacingY },  // 单列垂直，居中对齐
+        position: { x: centerX - 100 + xOffset, y: node.step_index * spacingY },
         data: {
           label: node.label,
           type: node.type,
@@ -43,12 +58,12 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           isBranch,
         },
         style: {
-          background: isBranch ? '#f0e6ff' : colorScheme.bg,
-          border: `2px solid ${isBranch ? '#b37feb' : colorScheme.border}`,
+          background: isBranch ? '#f5f5f5' : colorScheme.bg,
+          border: `2px solid ${isBranch ? '#d9d9d9' : colorScheme.border}`,
           borderRadius: '8px',
           padding: '12px',
           minWidth: '200px',
-          opacity: isBranch ? 0.85 : 1,
+          opacity: isBranch ? 0.5 : 1,
           boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
         },
       })
@@ -67,26 +82,29 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       if (!activeIds.has(edge.from) || !activeIds.has(edge.to)) return
 
       const style = EDGE_STYLES[edge.type] || EDGE_STYLES.Normal
+      const isBranchEdge = edge.type === 'Branch'
 
       edges.push({
         id: `edge_${idx}`,
         source: edge.from,
         target: edge.to,
-        animated: style.animated,
+        animated: isBranchEdge ? false : style.animated,
         style: {
-          stroke: style.color,
-          strokeWidth: 2,
-          ...(style.dashed ? { strokeDasharray: '5,5' } : {}),
+          stroke: isBranchEdge ? '#d9d9d9' : style.color,
+          strokeWidth: isBranchEdge ? 1 : 2,
+          ...(isBranchEdge ? { strokeDasharray: '4,4' } : (style.dashed ? { strokeDasharray: '5,5' } : {})),
         },
-        markerEnd: {
-          width: 12,
-          height: 12,
-          orient: 'auto',
-          refX: 6,
-          refY: 6,
-          color: style.color,
-          type: 'arrowclosed',
-        },
+        markerEnd: isBranchEdge
+          ? undefined
+          : {
+              width: 12,
+              height: 12,
+              orient: 'auto',
+              refX: 6,
+              refY: 6,
+              color: style.color,
+              type: 'arrowclosed',
+            },
       })
     })
 
