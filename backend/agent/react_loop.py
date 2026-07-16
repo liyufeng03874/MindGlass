@@ -53,6 +53,28 @@ class ReactLoop:
                 return node.id
         return None
 
+    def _create_pending_next(self, node_type: str, label: str, prev_id: str, step_index: int) -> ReasoningNode:
+        """创建一个 pending 状态的下一步节点，用于预期可视化"""
+        node = ReasoningNode(
+            node_id=f"pending_{_make_node_id(step_index, node_type)}",
+            node_type=node_type,
+            data={"pending": True},
+            status="pending",
+            step_index=step_index,
+            label=label,
+        )
+        self.store.add_node(node)
+        if prev_id:
+            self._add_edge(prev_id, node.id, edge_type="Pending")
+        return node
+
+    def _clear_pending(self, prev_id: Optional[str]) -> None:
+        """移除所有 pending 节点和边"""
+        pending_ids = {n.id for n in self.store.nodes if n.status == "pending"}
+        if pending_ids:
+            self.store.edges = [e for e in self.store.edges if e.to_id not in pending_ids and e.from_id not in pending_ids]
+            self.store.nodes = [n for n in self.store.nodes if n.id not in pending_ids]
+
     def _add_edge(self, from_id: str, to_id: str, edge_type: str = "Normal") -> None:
         """添加边"""
         self.store.add_edge(ReasoningEdge(from_id=from_id, to_id=to_id, edge_type=edge_type))
@@ -88,6 +110,9 @@ class ReactLoop:
             yield self._emit("status", {"message": f"🔧 正在执行: {tool_name}"})
             success, tool_result = await self._safe_tool_call(tool_name, tool_params)
 
+            # 清除所有 pending 占位，然后创建真实节点
+            self._clear_pending(None)
+
             tc_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "ToolCall"),
                 node_type="ToolCall",
@@ -104,13 +129,19 @@ class ReactLoop:
             self.store.add_node(tc_node)
             if prev_id:
                 self._add_edge(prev_id, tc_node.id)
-            yield self._emit("node_complete", {"node": tc_node.to_dict()})
+
+            # 预创建下一步 pending Observe 节点
+            self._create_pending_next("Observe", "观察结果", tc_node.id, self.step_index + 1)
+
+            yield self._emit("node_complete", {"node": tc_node.to_dict(), "graph": self.store.to_dict()})
 
             self.step_index += 1
-            prev_id = tc_node.id  # 现在上一个节点是 ToolCall
 
             # Observe（即使工具失败也生成观察节点，方便调试）
             yield self._emit("status", {"message": "📡 收集结果..."})
+
+            # 清除 pending Observe 占位，创建真实 Observe
+            self._clear_pending(None)
 
             obs_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "Observe"),
@@ -125,8 +156,15 @@ class ReactLoop:
                 label="观察结果",
             )
             self.store.add_node(obs_node)
-            self._add_edge(prev_id, obs_node.id)
-            yield self._emit("node_complete", {"node": obs_node.to_dict()})
+            self._add_edge(tc_node.id, obs_node.id)
+
+            # 预创建下一步 pending 节点
+            if i + 1 < len(steps):
+                self._create_pending_next("ToolCall", f"{steps[i+1].get('tool', 'search')}", obs_node.id, self.step_index + 1)
+            else:
+                self._create_pending_next("Answer", "最终回答", obs_node.id, self.step_index + 1)
+
+            yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
 
             observations.append(tool_result)
             self.step_index += 1
@@ -134,6 +172,9 @@ class ReactLoop:
     async def _generate_answer(self, query: str, observations: list, plan_info: str = "") -> AsyncGenerator[str, None]:
         """生成最终回答"""
         yield self._emit("status", {"message": "✍️ 正在生成回答..."})
+
+        # 移除 pending 占位节点
+        self._clear_pending(None)
 
         # 传入完整上下文：query + 规划思路 + observations
         context = f"规划思路：{plan_info}" if plan_info else ""
@@ -193,7 +234,12 @@ class ReactLoop:
             label=f"规划 ({len(steps)} 步)",
         )
         self.store.add_node(plan_node)
-        yield self._emit("node_complete", {"node": plan_node.to_dict()})
+
+        # 预创建第一步 pending ToolCall 节点
+        if steps:
+            self._create_pending_next("ToolCall", f"{steps[0].get('tool', 'search')}", plan_node.id, 1)
+
+        yield self._emit("node_complete", {"node": plan_node.to_dict(), "graph": self.store.to_dict()})
 
         self.step_index += 1
 

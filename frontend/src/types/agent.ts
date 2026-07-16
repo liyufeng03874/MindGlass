@@ -4,7 +4,7 @@
 
 export type NodeType = 'Plan' | 'ToolCall' | 'Observe' | 'Answer'
 export type NodeStatus = 'done' | 'current' | 'pending' | 'error' | 'discarded' | 'branch'
-export type EdgeType = 'Normal' | 'Retry' | 'Fallback' | 'Branch'
+export type EdgeType = 'Normal' | 'Retry' | 'Fallback' | 'Branch' | 'Pending'
 
 export interface AgentNode {
   id: string

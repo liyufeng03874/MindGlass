@@ -16,6 +16,7 @@ const EDGE_STYLES: Record<string, { color: string; animated: boolean; dashed: bo
   Retry:   { color: '#fa8c16', animated: true,  dashed: true },
   Fallback:{ color: '#ff4d4f', animated: true,  dashed: true },
   Branch:  { color: '#722ed1', animated: true,  dashed: true },
+  Pending: { color: '#b0b0b0', animated: true,  dashed: true },
 }
 
 export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
@@ -39,6 +40,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
     activeNodes.forEach((node) => {
       const colorScheme = NODE_COLORS[node.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: node.type }
       const isBranch = node.status === 'branch'
+      const isPending = node.status === 'pending'
       const isNewBranch = newBranchStartStep !== undefined && node.step_index >= newBranchStartStep && !isBranch
 
       // 分叉布局：branch 路径左偏，新路径右偏
@@ -58,13 +60,13 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           isBranch,
         },
         style: {
-          background: isBranch ? '#f5f5f5' : colorScheme.bg,
-          border: `2px solid ${isBranch ? '#d9d9d9' : colorScheme.border}`,
+          background: isPending ? '#fafafa' : (isBranch ? '#f5f5f5' : colorScheme.bg),
+          border: `2px ${isPending ? 'dashed' : 'solid'} ${isPending ? '#d9d9d9' : (isBranch ? '#d9d9d9' : colorScheme.border)}`,
           borderRadius: '8px',
           padding: '12px',
           minWidth: '200px',
-          opacity: isBranch ? 0.5 : 1,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          opacity: isPending ? 0.4 : (isBranch ? 0.5 : 1),
+          boxShadow: isPending ? 'none' : '0 2px 8px rgba(0,0,0,0.08)',
         },
       })
     })
@@ -83,6 +85,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
 
       const style = EDGE_STYLES[edge.type] || EDGE_STYLES.Normal
       const isBranchEdge = edge.type === 'Branch'
+      const isPendingEdge = edge.type === 'Pending'
 
       edges.push({
         id: `edge_${idx}`,
@@ -90,21 +93,23 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
         target: edge.to,
         animated: isBranchEdge ? false : style.animated,
         style: {
-          stroke: isBranchEdge ? '#d9d9d9' : style.color,
-          strokeWidth: isBranchEdge ? 1 : 2,
-          ...(isBranchEdge ? { strokeDasharray: '4,4' } : (style.dashed ? { strokeDasharray: '5,5' } : {})),
+          stroke: isPendingEdge ? '#d9d9d9' : (isBranchEdge ? '#d9d9d9' : style.color),
+          strokeWidth: isPendingEdge ? 1 : (isBranchEdge ? 1 : 2),
+          ...(isPendingEdge ? { strokeDasharray: '6,4' } : (isBranchEdge ? { strokeDasharray: '4,4' } : (style.dashed ? { strokeDasharray: '5,5' } : {}))),
         },
-        markerEnd: isBranchEdge
+        markerEnd: isPendingEdge
           ? undefined
-          : {
-              width: 12,
-              height: 12,
-              orient: 'auto',
-              refX: 6,
-              refY: 6,
-              color: style.color,
-              type: 'arrowclosed',
-            },
+          : (isBranchEdge
+            ? undefined
+            : {
+                width: 12,
+                height: 12,
+                orient: 'auto',
+                refX: 6,
+                refY: 6,
+                color: style.color,
+                type: 'arrowclosed',
+              }),
       })
     })
 
