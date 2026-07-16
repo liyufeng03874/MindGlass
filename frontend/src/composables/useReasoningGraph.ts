@@ -22,6 +22,9 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
   const flowNodes = computed<Node[]>(() => {
     if (!graph.value) return []
 
+    console.log('[flowNodes] graph.nodes count:', graph.value.nodes.length)
+    console.log('[flowNodes] pending nodes:', graph.value.nodes.filter(n => n.status === 'pending').map(n => n.id))
+
     const spacingY = 150  // 垂直间距（按 step_index）
     const centerX = 300   // 水平居中
     const branchOffsetX = -120  // branch 路径左偏移
@@ -38,6 +41,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
 
     activeNodes.forEach((node) => {
       const colorScheme = NODE_COLORS[node.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: node.type }
+      const isPending = node.status === 'pending'
       const isBranch = node.status === 'branch'
       const isNewBranch = newBranchStartStep !== undefined && node.step_index >= newBranchStartStep && !isBranch
 
@@ -46,7 +50,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       if (isBranch) xOffset = branchOffsetX
       else if (isNewBranch) xOffset = newBranchOffsetX
 
-      nodes.push({
+      const flowNode: Node = {
         id: node.id,
         position: { x: centerX - 100 + xOffset, y: node.step_index * spacingY },
         data: {
@@ -58,15 +62,26 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           isBranch,
         },
         style: {
-          background: isBranch ? '#f5f5f5' : colorScheme.bg,
-          border: `2px solid ${isBranch ? '#d9d9d9' : colorScheme.border}`,
+          background: isPending ? '#fafafa' : isBranch ? '#f5f5f5' : colorScheme.bg,
+          border: isPending ? `2px dashed ${colorScheme.border}` : `2px solid ${isBranch ? '#d9d9d9' : colorScheme.border}`,
           borderRadius: '8px',
           padding: '12px',
           minWidth: '200px',
-          opacity: isBranch ? 0.5 : 1,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          opacity: isBranch ? 0.5 : isPending ? 0.6 : 1,
+          boxShadow: isPending ? 'none' : '0 2px 8px rgba(0,0,0,0.08)',
         },
-      })
+      }
+
+      if (node.status === 'pending') {
+        console.log('[flowNodes] PENDING node:', {
+          id: flowNode.id,
+          type: node.type,
+          position: flowNode.position,
+          label: node.label,
+        })
+      }
+
+      nodes.push(flowNode)
     })
 
     return nodes

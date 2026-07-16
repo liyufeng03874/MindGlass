@@ -55,7 +55,7 @@ const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解
   function onSend(query: string) {
   sendMessage(query)
   // 第一次发送消息时，展示右侧推理面板
-  if (graph.value.nodes.length === 0 && !showGraph.value) {
+  if (!showGraph.value) {
     showGraph.value = true
   }
 }

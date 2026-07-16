@@ -1,7 +1,9 @@
 import {ref} from 'vue'
-import type {AgentNode, ReasoningGraph, SSEEvent} from '@/types/agent'
+import type {AgentNode, AgentEdge, ReasoningGraph, SSEEvent} from '@/types/agent'
 
 const API_BASE = 'http://localhost:8002'
+
+let pendingIdCounter = 0
 
 export function useAgentGraph() {
   const graph = ref<ReasoningGraph>({
@@ -29,6 +31,18 @@ export function useAgentGraph() {
       branches: [],
       meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
     }
+
+    // 立即显示 pending "规划中..." 节点
+    pendingIdCounter++
+    graph.value.nodes.push({
+      id: `frontend_pending_${pendingIdCounter}`,
+      type: 'Plan',
+      data: { pending: true, label: '规划中...' },
+      status: 'pending',
+      step_index: 0,
+      branch_id: null,
+      label: '规划中...pendding',
+    })
 
     const eventSource = new EventSource(
       `${API_BASE}/api/run?query=${encodeURIComponent(query)}`
@@ -61,29 +75,30 @@ export function useAgentGraph() {
       case 'node_complete': {
         const node = event.data.node as AgentNode
 
-        // 优先使用后端推送的完整图数据（含正确的 nodes 和 edges）
+        // 后端返回完整图，直接覆盖
         if (event.data.graph?.nodes) {
           graph.value.nodes = event.data.graph.nodes
           graph.value.edges = event.data.graph.edges || []
-          console.log('[Node Complete] full graph:', graph.value.nodes.length, 'nodes', graph.value.edges.length, 'edges')
         } else {
           graph.value.nodes.push(node)
-          // 降级：自己推边
           const activeNodes = graph.value.nodes.filter(
             n => n.status !== 'branch' && n.status !== 'discarded' && n.id !== node.id
           )
           if (activeNodes.length > 0) {
             const prevNode = activeNodes[activeNodes.length - 1]
-            const edgeType = node.status === 'branch' ? 'Branch' : 'Normal'
             graph.value.edges.push({
               from: prevNode.id,
               to: node.id,
-              type: edgeType,
+              type: 'Normal',
             })
           }
         }
 
-        // 如果是 Answer 节点，添加到消息列表
+        // 追加 1 个 pending
+        if (node.type !== 'Answer') {
+          pushPendingNode(node)
+        }
+
         if (node.type === 'Answer') {
           messages.value.push({ role: 'agent', content: node.data.output })
           status.value = '✅ 完成'
@@ -98,6 +113,7 @@ export function useAgentGraph() {
         connected.value = false
         isRunning.value = false
         if (event.data.graph) {
+          console.log('[Run Complete] edges:', JSON.stringify(event.data.graph.edges, null, 2))
           graph.value = event.data.graph as ReasoningGraph
           console.log('[Run Complete]', graph.value.nodes.length, 'nodes', graph.value.edges.length, 'edges')
         }
@@ -110,6 +126,70 @@ export function useAgentGraph() {
         isRunning.value = false
         break
     }
+  }
+
+  /** 前端自动推 pending 虚拟节点 */
+  function pushPendingNode(prevNode: AgentNode) {
+    const planNode = graph.value.nodes.find(n => n.type === 'Plan' && n.status !== 'pending')
+    if (!planNode?.data?.steps || !Array.isArray(planNode.data.steps)) {
+      console.log('[pushPending] NO STEPS, return')
+      return
+    }
+
+    const steps = planNode.data.steps as Array<{ tool: string }>
+    console.log('[pushPending] prevNode:', prevNode.type, 'step_index:', prevNode.step_index, 'steps:', steps.length)
+
+    let nextType: string
+    let nextLabel = ''
+
+    if (prevNode.type === 'Plan') {
+      nextType = steps.length > 0 ? 'ToolCall' : 'Answer'
+      nextLabel = steps.length > 0 ? steps[0].tool : '最终回答'
+    } else if (prevNode.type === 'ToolCall') {
+      nextType = 'Observe'
+      nextLabel = '观察结果'
+    } else if (prevNode.type === 'Observe') {
+      // step_index 关系：Plan=0, TC1=1, Ob1=2, TC2=3, Ob2=4, ...
+      // TC 的 step_index 总是奇数，Ob 总是偶数
+      // 当前 Ob 的 step_index 为 N，下一个 TC 是 step_index N+1
+      // 对应的 steps 索引 = (N+1-1)/2 = N/2
+      const nextStepIndex = Math.floor(prevNode.step_index / 2)
+      console.log('[pushPending] Ob step_index=', prevNode.step_index, '→ nextStepIndex:', nextStepIndex)
+      const nextStep = steps[nextStepIndex]
+      if (nextStep) {
+        nextType = 'ToolCall'
+        nextLabel = nextStep.tool
+      } else {
+        nextType = 'Answer'
+        nextLabel = '最终回答'
+      }
+    } else {
+      console.log('[pushPending] unknown type:', prevNode.type, '— return')
+      return
+    }
+
+    pendingIdCounter++
+    const pendingNode: AgentNode = {
+      id: `frontend_pending_${pendingIdCounter}`,
+      type: nextType as AgentNode['type'],
+      data: { pending: true, label: nextLabel },
+      status: 'pending',
+      step_index: prevNode.step_index + 1,
+      branch_id: prevNode.branch_id,
+      label: nextLabel+'pendding节点',
+    }
+    console.log('-------------------[pushPending] CREATED:', pendingNode)
+
+    graph.value.nodes.push(pendingNode)
+    graph.value.edges.push({
+      from: prevNode.id,
+      to: pendingNode.id,
+      type: 'Pending' as any,
+    })
+    console.log('[pushPending] DONE. nodes:', graph.value.nodes.length, 'edges:', graph.value.edges.length)
+    // 强制触发 Vue 响应式更新
+    graph.value.nodes = [...graph.value.nodes]
+    graph.value.edges = [...graph.value.edges]
   }
 
   /** 从指定 step_index 重试（支持编辑后重跑） */
@@ -171,5 +251,6 @@ export function useAgentGraph() {
     messages,
     sendMessage,
     retryFrom,
+    pushPendingNode,
   }
 }

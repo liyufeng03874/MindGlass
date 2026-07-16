@@ -104,7 +104,7 @@ class ReactLoop:
             self.store.add_node(tc_node)
             if prev_id:
                 self._add_edge(prev_id, tc_node.id)
-            yield self._emit("node_complete", {"node": tc_node.to_dict()})
+            yield self._emit("node_complete", {"node": tc_node.to_dict(), "graph": self.store.to_dict()})
 
             self.step_index += 1
             prev_id = tc_node.id  # 现在上一个节点是 ToolCall
@@ -126,7 +126,7 @@ class ReactLoop:
             )
             self.store.add_node(obs_node)
             self._add_edge(prev_id, obs_node.id)
-            yield self._emit("node_complete", {"node": obs_node.to_dict()})
+            yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
 
             observations.append(tool_result)
             self.step_index += 1
@@ -164,7 +164,7 @@ class ReactLoop:
         if prev_id:
             self._add_edge(prev_id, ans_node.id)
 
-        yield self._emit("node_complete", {"node": ans_node.to_dict()})
+        yield self._emit("node_complete", {"node": ans_node.to_dict(), "graph": self.store.to_dict()})
         yield self._emit("run_complete", {"graph": self.store.to_dict()})
 
     async def run(self, query: str) -> AsyncGenerator[str, None]:
@@ -193,7 +193,7 @@ class ReactLoop:
             label=f"规划 ({len(steps)} 步)",
         )
         self.store.add_node(plan_node)
-        yield self._emit("node_complete", {"node": plan_node.to_dict()})
+        yield self._emit("node_complete", {"node": plan_node.to_dict(), "graph": self.store.to_dict()})
 
         self.step_index += 1
 
@@ -302,7 +302,7 @@ class ReactLoop:
             )
             self.store.add_node(obs_node)
             self._add_edge(prev_id, obs_node.id)
-            yield self._emit("node_complete", {"node": obs_node.to_dict()})
+            yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
 
             observations.append(tool_result)
             self.step_index += 1
