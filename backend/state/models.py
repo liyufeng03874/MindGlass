@@ -25,7 +25,6 @@ class EdgeType(str, Enum):
     Retry = "Retry"
     Fallback = "Fallback"
     Branch = "Branch"
-    Pending = "Pending"
 
 
 class ReasoningNode:

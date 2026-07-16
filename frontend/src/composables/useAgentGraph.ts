@@ -22,20 +22,9 @@ export function useAgentGraph() {
     connected.value = true
     isRunning.value = true
 
-    // 重置图状态，并预创建 pending Plan 节点
-    const pendingPlanId = `pending_${Date.now()}_Plan`
+    // 重置图状态
     graph.value = {
-      nodes: [
-        {
-          id: pendingPlanId,
-          type: 'Plan',
-          data: { pending: true },
-          status: 'pending',
-          step_index: 0,
-          branch_id: null,
-          label: '规划中...',
-        },
-      ],
+      nodes: [],
       edges: [],
       branches: [],
       meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
