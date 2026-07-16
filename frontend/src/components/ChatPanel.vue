@@ -13,7 +13,8 @@
         :class="['message', msg.role]"
       >
         <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
-        <div class="bubble">{{ msg.content }}</div>
+        <div class="bubble" v-if="msg.role === 'agent'" v-html="md.render(msg.content)"></div>
+        <div class="bubble" v-else>{{ msg.content }}</div>
       </div>
       <div v-if="loading" class="message agent">
         <div class="avatar">🤖</div>
@@ -37,6 +38,9 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
+import MarkdownIt from 'markdown-it'
+
+const md = new MarkdownIt({ breaks: true, linkify: true })
 
 const props = defineProps<{
   messages: Array<{ role: 'user' | 'agent', content: string }>
@@ -117,6 +121,102 @@ function handleSend() {
   background: #f0f0f0;
   color: #333;
   border-bottom-left-radius: 4px;
+}
+
+/* Agent 消息的 Markdown 样式 */
+.message.agent .bubble :deep(h1),
+.message.agent .bubble :deep(h2),
+.message.agent .bubble :deep(h3),
+.message.agent .bubble :deep(h4) {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.message.agent .bubble :deep(h1) { font-size: 1.25em; }
+.message.agent .bubble :deep(h2) { font-size: 1.15em; }
+.message.agent .bubble :deep(h3) { font-size: 1.05em; }
+.message.agent .bubble :deep(h1):first-child,
+.message.agent .bubble :deep(h2):first-child,
+.message.agent .bubble :deep(h3):first-child { margin-top: 0; }
+
+.message.agent .bubble :deep(p) {
+  margin: 0.4em 0;
+}
+.message.agent .bubble :deep(p):first-child { margin-top: 0; }
+.message.agent .bubble :deep(p):last-child { margin-bottom: 0; }
+
+.message.agent .bubble :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+}
+.message.agent .bubble :deep(th),
+.message.agent .bubble :deep(td) {
+  border: 1px solid #d9d9d9;
+  padding: 6px 10px;
+  text-align: left;
+}
+.message.agent .bubble :deep(th) {
+  background: #e8e8e8;
+  font-weight: 600;
+}
+.message.agent .bubble :deep(tr:nth-child(even)) {
+  background: rgba(0,0,0,0.02);
+}
+
+.message.agent .bubble :deep(blockquote) {
+  border-left: 3px solid #1677ff;
+  margin: 0.5em 0;
+  padding: 0.3em 0.8em;
+  color: #555;
+  background: rgba(22,119,255,0.04);
+  border-radius: 0 4px 4px 0;
+}
+
+.message.agent .bubble :deep(code) {
+  background: rgba(0,0,0,0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+}
+.message.agent .bubble :deep(pre) {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.message.agent .bubble :deep(pre code) {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: 0.85em;
+}
+
+.message.agent .bubble :deep(ul),
+.message.agent .bubble :deep(ol) {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+.message.agent .bubble :deep(li) {
+  margin: 0.2em 0;
+}
+
+.message.agent .bubble :deep(hr) {
+  border: none;
+  border-top: 1px solid #d9d9d9;
+  margin: 0.8em 0;
+}
+
+.message.agent .bubble :deep(a) {
+  color: #1677ff;
+  text-decoration: none;
+}
+.message.agent .bubble :deep(a:hover) {
+  text-decoration: underline;
 }
 
 .thinking {
