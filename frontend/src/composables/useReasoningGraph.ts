@@ -16,43 +16,73 @@ const EDGE_STYLES: Record<string, { color: string; animated: boolean; dashed: bo
   Retry:   { color: '#fa8c16', animated: true,  dashed: true },
   Fallback:{ color: '#ff4d4f', animated: true,  dashed: true },
   Branch:  { color: '#722ed1', animated: true,  dashed: true },
+  Parallel:{ color: '#52c41a', animated: false, dashed: false },
 }
 
 export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
   const flowNodes = computed<Node[]>(() => {
     if (!graph.value) return []
 
-    console.log('[flowNodes] graph.nodes count:', graph.value.nodes.length)
-    console.log('[flowNodes] pending nodes:', graph.value.nodes.filter(n => n.status === 'pending').map(n => n.id))
+    // console.log('[flowNodes] graph.nodes count:', graph.value.nodes.length)
+    // console.log('[flowNodes] pending nodes:', graph.value.nodes.filter(n => n.status === 'pending').map(n => n.id))
 
     const spacingY = 150  // 垂直间距（按 step_index）
     const centerX = 300   // 水平居中
     const branchOffsetX = -120  // branch 路径左偏移
     const newBranchOffsetX = 120  // 新路径右偏移
+    const spacingX = 220  // 并行节点水平间距
     const nodes: Node[] = []
     const activeNodes = graph.value.nodes.filter(n => n.status !== 'discarded')
 
-    // 找到分叉点：第一个 branch 节点的 step_index
+    // 找到分叉点
     const firstBranchStep = activeNodes.find(n => n.status === 'branch')?.step_index
-    // 新路径的起点：第一个非 branch 但 step_index >= firstBranchStep 的节点
     const newBranchStartStep = firstBranchStep !== undefined
       ? activeNodes.find(n => n.status !== 'branch' && n.step_index >= firstBranchStep)?.step_index
       : undefined
+
+    // 检测并行组：同 step_index + 同 parallel_group_id 的 ToolCall 节点
+    const parallelGroups = new Map<string, AgentNode[]>()
+    activeNodes.forEach(node => {
+      const pgId = node.data?.parallel_group_id
+      if (pgId) {
+        if (!parallelGroups.has(pgId)) parallelGroups.set(pgId, [])
+        parallelGroups.get(pgId)!.push(node)
+      }
+    })
+
+    // 记录哪些节点属于并行组
+    const parallelNodeIds = new Set<string>()
+    parallelGroups.forEach(group => {
+      group.forEach(n => parallelNodeIds.add(n.id))
+    })
 
     activeNodes.forEach((node) => {
       const colorScheme = NODE_COLORS[node.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: node.type }
       const isPending = node.status === 'pending'
       const isBranch = node.status === 'branch'
       const isNewBranch = newBranchStartStep !== undefined && node.step_index >= newBranchStartStep && !isBranch
+      const isParallel = parallelNodeIds.has(node.id)
 
-      // 分叉布局：branch 路径左偏，新路径右偏
+      // 分叉布局
       let xOffset = 0
       if (isBranch) xOffset = branchOffsetX
       else if (isNewBranch) xOffset = newBranchOffsetX
 
+      // 并行节点水平排列
+      let xPosition = centerX - 100 + xOffset
+      if (isParallel) {
+        const pgId = node.data?.parallel_group_id
+        const group = parallelGroups.get(pgId!)
+        if (group) {
+          const idx = group.findIndex(n => n.id === node.id)
+          // 居中：整组偏移
+          xPosition = centerX - 100 + xOffset + (idx - (group.length - 1) / 2) * spacingX
+        }
+      }
+
       const flowNode: Node = {
         id: node.id,
-        position: { x: centerX - 100 + xOffset, y: node.step_index * spacingY },
+        position: { x: xPosition, y: node.step_index * spacingY },
         data: {
           label: node.label,
           type: node.type,
@@ -60,10 +90,11 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           data: node.data,
           color: colorScheme,
           isBranch,
+          isParallel,
         },
         style: {
           background: isPending ? '#fafafa' : isBranch ? '#f5f5f5' : colorScheme.bg,
-          border: isPending ? `2px dashed ${colorScheme.border}` : `2px solid ${isBranch ? '#d9d9d9' : colorScheme.border}`,
+          border: isPending ? `2px dashed ${colorScheme.border}` : isParallel ? `3px solid ${colorScheme.border}` : `2px solid ${isBranch ? '#d9d9d9' : colorScheme.border}`,
           borderRadius: '8px',
           padding: '12px',
           minWidth: '200px',

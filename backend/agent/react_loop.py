@@ -41,6 +41,7 @@ class ReactLoop:
         self.step_index = 0
         self._cached_steps: list[dict] = []
         self._cached_plan_info: str = ""
+        self._last_node: Optional[ReasoningNode] = None
 
     def _emit(self, event_type: str, data: dict) -> str:
         """格式化 SSE 事件"""
@@ -73,63 +74,110 @@ class ReactLoop:
     async def _run_steps(self, steps: list[dict], start_index: int, observations: list) -> AsyncGenerator[str, None]:
         """
         从 start_index 开始执行 steps 循环，包含 ToolCall → Observe。
+        连续的工具调用（search、rag_retrieve 等）会并行执行（asyncio.gather）。
+        并行节点共享同一 step_index 和 parallel_group_id，前端据此横向排列。
         用于 run() 和 retry_from() 复用。
         """
-        for i in range(start_index, len(steps)):
+        i = start_index
+        while i < len(steps):
             step = steps[i]
             tool_name = step.get("tool", "search")
-            tool_params = step.get("params", {})
-            description = step.get("description", "")
 
-            # 先获取上一个节点 ID（在 add_node 之前！）
-            prev_id = self._prev_node_id()
+            # 收集连续的工具调用步骤，分组并行
+            batch: list[tuple[int, dict]] = [(i, step)]
+            j = i + 1
+            while j < len(steps):
+                batch.append((j, steps[j]))
+                j += 1
+                if j >= len(steps):
+                    break
 
-            # ToolCall
-            yield self._emit("status", {"message": f"🔧 正在执行: {tool_name}"})
-            success, tool_result = await self._safe_tool_call(tool_name, tool_params)
+            # 并行组 ID
+            parallel_group_id = f"pg_{uuid.uuid4().hex[:6]}"
+            # 锁定并行组共同的起点（所有 ToolCall 都从这里连出）
+            parallel_prev_id = self._prev_node_id()
 
-            tc_node = ReasoningNode(
-                node_id=_make_node_id(self.step_index, "ToolCall"),
-                node_type="ToolCall",
-                data={
-                    "tool": tool_name,
-                    "params": tool_params,
-                    "result": tool_result,
-                    "description": description,
-                },
-                status="done" if success else "error",
-                step_index=self.step_index,
-                label=f"{tool_name}",
-            )
-            self.store.add_node(tc_node)
-            if prev_id:
-                self._add_edge(prev_id, tc_node.id)
-            yield self._emit("node_complete", {"node": tc_node.to_dict(), "graph": self.store.to_dict()})
+            if len(batch) > 1:
+                yield self._emit("status", {"message": f"🔧 并行执行 {len(batch)} 个工具调用..."})
 
-            self.step_index += 1
-            prev_id = tc_node.id  # 现在上一个节点是 ToolCall
+                async def _exec(idx, s):
+                    tn = s.get("tool", "search")
+                    tp = s.get("params", {})
+                    ok, res = await self._safe_tool_call(tn, tp)
+                    return idx, s, ok, res
 
-            # Observe（即使工具失败也生成观察节点，方便调试）
-            yield self._emit("status", {"message": "📡 收集结果..."})
+                results = await asyncio.gather(*[_exec(idx, s) for idx, s in batch])
+                results.sort(key=lambda x: x[0])
 
-            obs_node = ReasoningNode(
-                node_id=_make_node_id(self.step_index, "Observe"),
-                node_type="Observe",
-                data={
-                    "source": tc_node.id,
-                    "tool": tool_name,
-                    "result_summary": json.dumps(tool_result, ensure_ascii=False),
-                },
-                status="done",
-                step_index=self.step_index,
-                label="观察结果",
-            )
-            self.store.add_node(obs_node)
-            self._add_edge(prev_id, obs_node.id)
-            yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
+                for idx, s, ok, res in results:
+                    self._emit_toolcall_observe(s, ok, res, observations, parallel_group_id=parallel_group_id, fixed_prev_id=parallel_prev_id)
+                    yield self._emit_last_node()
+                # 并行组整体消耗 2 步：ToolCall 行 + Observe 行
+                self.step_index += 2
+            else:
+                # 单个工具，串行
+                tn = batch[0][1].get("tool", "search")
+                tp = batch[0][1].get("params", {})
+                yield self._emit("status", {"message": f"🔧 正在执行: {tn}"})
+                ok, res = await self._safe_tool_call(tn, tp)
+                self._emit_toolcall_observe(batch[0][1], ok, res, observations)
+                yield self._emit_last_node()
+                self.step_index += 2
 
-            observations.append(tool_result)
-            self.step_index += 1
+            i = j
+
+    def _emit_toolcall_observe(self, step: dict, success: bool, tool_result: dict, observations: list, parallel_group_id: Optional[str] = None, fixed_prev_id: Optional[str] = None) -> None:
+        """生成 ToolCall + Observe 节点（不 yield，供并行后批量 emit）"""
+        tool_name = step.get("tool", "search")
+        description = step.get("description", "")
+        # 并行组使用固定 prev_id，串行节点动态获取
+        prev_id = fixed_prev_id if fixed_prev_id is not None else self._prev_node_id()
+
+        # 并行组节点：共享同一 step_index
+        tc_step = self.step_index
+        obs_step = self.step_index + 1
+
+        tc_node = ReasoningNode(
+            node_id=_make_node_id(self.step_index, "ToolCall"),
+            node_type="ToolCall",
+            data={
+                "tool": tool_name,
+                "params": step.get("params", {}),
+                "result": tool_result,
+                "description": description,
+                "parallel_group_id": parallel_group_id,
+            },
+            status="done" if success else "error",
+            step_index=tc_step,
+            label=f"{tool_name}",
+        )
+        self.store.add_node(tc_node)
+        if prev_id:
+            edge_type = "Parallel" if parallel_group_id else "Normal"
+            self._add_edge(prev_id, tc_node.id, edge_type=edge_type)
+        self._last_node = tc_node
+
+        obs_node = ReasoningNode(
+            node_id=_make_node_id(self.step_index, "Observe"),
+            node_type="Observe",
+            data={
+                "source": tc_node.id,
+                "tool": tool_name,
+                "result_summary": json.dumps(tool_result, ensure_ascii=False),
+            },
+            status="done",
+            step_index=obs_step,
+            label="观察结果",
+        )
+        self.store.add_node(obs_node)
+        self._add_edge(tc_node.id, obs_node.id)
+        self._last_node = obs_node
+        observations.append(tool_result)
+
+    def _emit_last_node(self) -> str:
+        """发送最后一个节点的 SSE 事件"""
+        node = self._last_node
+        return self._emit("node_complete", {"node": node.to_dict(), "graph": self.store.to_dict()})
 
     async def _generate_answer(self, query: str, observations: list, plan_info: str = "") -> AsyncGenerator[str, None]:
         """生成最终回答"""
@@ -165,6 +213,23 @@ class ReactLoop:
             self._add_edge(prev_id, ans_node.id)
 
         yield self._emit("node_complete", {"node": ans_node.to_dict(), "graph": self.store.to_dict()})
+
+        # 生成精简图结构（用于日志）
+        graph_summary = {
+            "nodes": [
+                {"id": n.id, "type": n.type, "step_index": n.step_index, "label": n.label, "status": n.status,
+                 "parallel_group_id": n.data.get("parallel_group_id") if n.data else None}
+                for n in self.store.nodes
+            ],
+            "edges": [
+                {"from": e.from_id, "to": e.to_id, "type": e.type}
+                for e in self.store.edges
+            ],
+        }
+        print(f"\n{'='*60}")
+        print(f"[Run Complete] graph_summary: {json.dumps(graph_summary, ensure_ascii=False, indent=2)}")
+        print(f"{'='*60}\n")
+
         yield self._emit("run_complete", {"graph": self.store.to_dict()})
 
     async def run(self, query: str) -> AsyncGenerator[str, None]:

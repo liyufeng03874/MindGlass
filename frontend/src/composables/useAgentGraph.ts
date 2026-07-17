@@ -66,7 +66,7 @@ export function useAgentGraph() {
   }
 
   function handleEvent(event: SSEEvent) {
-    console.log('[SSE]', event.type, event.data)
+    // console.log('[SSE]', event.type, event.data)
     switch (event.type) {
       case 'status':
         status.value = event.data.message
@@ -132,12 +132,16 @@ export function useAgentGraph() {
   function pushPendingNode(prevNode: AgentNode) {
     const planNode = graph.value.nodes.find(n => n.type === 'Plan' && n.status !== 'pending')
     if (!planNode?.data?.steps || !Array.isArray(planNode.data.steps)) {
-      console.log('[pushPending] NO STEPS, return')
       return
     }
 
     const steps = planNode.data.steps as Array<{ tool: string }>
-    console.log('[pushPending] prevNode:', prevNode.type, 'step_index:', prevNode.step_index, 'steps:', steps.length)
+    const totalSteps = steps.length
+
+    // 并行场景：用已完成的 Observe 数量判断
+    const completedObs = graph.value.nodes.filter(
+      n => n.type === 'Observe' && n.status === 'done'
+    ).length
 
     let nextType: string
     let nextLabel = ''
@@ -149,24 +153,27 @@ export function useAgentGraph() {
       nextType = 'Observe'
       nextLabel = '观察结果'
     } else if (prevNode.type === 'Observe') {
-      // step_index 关系：Plan=0, TC1=1, Ob1=2, TC2=3, Ob2=4, ...
-      // TC 的 step_index 总是奇数，Ob 总是偶数
-      // 当前 Ob 的 step_index 为 N，下一个 TC 是 step_index N+1
-      // 对应的 steps 索引 = (N+1-1)/2 = N/2
-      const nextStepIndex = Math.floor(prevNode.step_index / 2)
-      console.log('[pushPending] Ob step_index=', prevNode.step_index, '→ nextStepIndex:', nextStepIndex)
-      const nextStep = steps[nextStepIndex]
-      if (nextStep) {
-        nextType = 'ToolCall'
-        nextLabel = nextStep.tool
-      } else {
+      if (completedObs >= totalSteps) {
+        // 所有工具已完成 → Answer
         nextType = 'Answer'
         nextLabel = '最终回答'
+      } else {
+        // 还有步骤未执行
+        const nextStep = steps[completedObs]
+        if (nextStep) {
+          nextType = 'ToolCall'
+          nextLabel = nextStep.tool
+        } else {
+          nextType = 'Answer'
+          nextLabel = '最终回答'
+        }
       }
     } else {
-      console.log('[pushPending] unknown type:', prevNode.type, '— return')
       return
     }
+
+    // 只拦 pending ToolCall：所有工具已完成时不推 ToolCall
+    if (nextType === 'ToolCall' && completedObs >= totalSteps) return
 
     pendingIdCounter++
     const pendingNode: AgentNode = {
@@ -178,7 +185,6 @@ export function useAgentGraph() {
       branch_id: prevNode.branch_id,
       label: nextLabel,
     }
-    console.log('-------------------[pushPending] CREATED:', pendingNode)
 
     graph.value.nodes.push(pendingNode)
     graph.value.edges.push({
@@ -186,8 +192,6 @@ export function useAgentGraph() {
       to: pendingNode.id,
       type: 'Pending' as any,
     })
-    console.log('[pushPending] DONE. nodes:', graph.value.nodes.length, 'edges:', graph.value.edges.length)
-    // 强制触发 Vue 响应式更新
     graph.value.nodes = [...graph.value.nodes]
     graph.value.edges = [...graph.value.edges]
   }
