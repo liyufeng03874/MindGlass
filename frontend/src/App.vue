@@ -26,6 +26,7 @@
     <main class="main-content">
       <div :class="['left-panel', { full: !showGraph }]">
         <ChatPanel
+          ref="chatPanelRef"
           :messages="messages"
           :disabled="isRunning"
           @send="onSend"
@@ -34,7 +35,7 @@
       </div>
       <transition name="slide">
         <div v-if="showGraph" class="right-panel">
-          <ReasoningGraph :graph="graph" :isRunning="isRunning" @retry="onRetry" />
+          <ReasoningGraph :graph="graph" :isRunning="isRunning" @retry="onRetry" @focus-answer="onFocusAnswer" />
         </div>
       </transition>
     </main>
@@ -50,6 +51,7 @@ import { useAgentGraph } from './composables/useAgentGraph'
 const { graph, status, connected, messages, isRunning, sendMessage, retryFrom } = useAgentGraph()
 
 const showGraph = ref(false)
+const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
 const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解复杂问题、调用工具搜索、生成结构化回答。试试问我点什么吧～'
 
   function onSend(query: string) {
@@ -64,6 +66,12 @@ function onRetry(stepIndex: number, editedData: Record<string, any>) {
   retryFrom(stepIndex, editedData)
 }
 
+function onFocusAnswer() {
+  if (chatPanelRef.value) {
+    chatPanelRef.value.highlightLastMessage()
+  }
+}
+
 function loadTestData() {
   // 调用后端加载 demo_6 数据
   fetch('http://localhost:8002/api/load-demo', { method: 'POST' })
@@ -76,6 +84,20 @@ function loadTestData() {
     .then(data => {
       graph.value = data
       showGraph.value = true
+
+      // 提取 Answer 节点的 output 填充到聊天
+      const answerNode = data.nodes?.find((n: any) => n.type === 'Answer')
+      if (answerNode?.data?.output) {
+        messages.value.push({
+          role: 'user',
+          content: answerNode.data.input || '测试问题',
+        })
+        messages.value.push({
+          role: 'agent',
+          content: answerNode.data.output,
+        })
+      }
+
       status.value = '📦 已加载 demo_6 测试数据'
     })
     .catch(() => {

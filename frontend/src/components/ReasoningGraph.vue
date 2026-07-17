@@ -33,16 +33,24 @@
 
         <!-- ToolCall 编辑 -->
         <template v-if="editingNode.type === 'ToolCall'">
-          <label>工具名称</label>
-          <input v-model="editForm.tool" class="input-field" />
+          <label>工具选择</label>
+          <select v-model="editForm.tool" class="select-field">
+            <option value="search">🔍 搜索 (search)</option>
+            <option value="rag_retrieve">📖 RAG 检索 (rag_retrieve)</option>
+          </select>
 
-          <label>参数（JSON）</label>
-          <textarea
-            v-model="editForm.paramsJson"
-            class="textarea-field"
-            rows="6"
-            placeholder='{"query": "..."}'
+          <label>查询内容</label>
+          <input
+            v-model="editForm.queryInput"
+            class="input-field"
+            placeholder="输入你想查询的内容..."
           />
+
+          <!-- 输出预览 -->
+          <div v-if="toolCallResult" class="output-preview">
+            <label>📤 输出结果</label>
+            <pre class="output-content">{{ toolCallResult }}</pre>
+          </div>
         </template>
 
         <!-- Plan 编辑 -->
@@ -59,19 +67,18 @@
           />
         </template>
 
-        <!-- Observe 编辑 -->
+        <!-- Observe 只展示 -->
         <template v-else-if="editingNode.type === 'Observe'">
-          <label>观察结果摘要</label>
-          <textarea v-model="editForm.resultSummary" class="textarea-field" rows="6" />
+          <div v-if="observeResult" class="output-preview observe-only">
+            <label>👁️ 观察结果</label>
+            <div class="answer-content" v-html="md.render(observeResult)"></div>
+          </div>
+          <p v-else class="readonly-hint">暂无观察结果</p>
         </template>
 
-        <!-- Answer 只读 -->
-        <template v-else-if="editingNode.type === 'Answer'">
-          <p class="readonly-hint">回答节点不可编辑，可点击重试重新生成。</p>
-        </template>
       </div>
 
-      <div class="panel-footer">
+      <div v-if="editingNode && editingNode.type !== 'Observe'" class="panel-footer">
         <button class="retry-btn" @click="handleRetry" :disabled="isRunning">
           {{ isRunning ? '执行中...' : '🔄 截断并重试' }}
         </button>
@@ -83,6 +90,7 @@
 <script setup lang="ts">
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { computed, ref, watch } from 'vue'
+import MarkdownIt from 'markdown-it'
 import { useReasoningGraph } from '@/composables/useReasoningGraph'
 import type { ReasoningGraph, AgentNode } from '@/types/agent'
 
@@ -93,6 +101,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'retry', stepIndex: number, editedData: Record<string, any>): void
+  (e: 'focus-answer'): void
 }>()
 
 const vueFlowRef = ref(null)
@@ -102,12 +111,65 @@ const { flowNodes: nodes, flowEdges: edges } = useReasoningGraph(graphRef)
 const { fitView } = useVueFlow()
 
 // --- 编辑面板 ---
+const md = new MarkdownIt({ breaks: true, linkify: true })
+
 const editingNode = ref<AgentNode | null>(null)
+
+// 输出预览 computed
+const toolCallResult = computed(() => {
+  if (!editingNode.value?.data?.result) return ''
+  const r = editingNode.value.data.result
+  if (typeof r === 'string') return r
+  if (r.result?.answer) return r.result.answer;
+  if (r.answer) return r.answer  // 也可能是直接嵌套一层
+  if (Array.isArray(r.results)) {
+    return r.results.map((x: any) => `[${x.title}]\n${x.snippet || x.content || ''}`).join('\n\n---\n\n')
+  }
+  try { return JSON.stringify(r, null, 2) } catch { return String(r) }
+})
+
+const observeResult = computed(() => {
+  if (!editingNode.value?.data?.result_summary) return ''
+  const summary = editingNode.value.data.result_summary
+
+  // 尝试解析：先试标准 JSON，再试 Python dict 格式（单引号）
+  let parsed: any = null
+
+  try {
+    parsed = JSON.parse(summary)
+  } catch {
+    // Python dict -> JSON: 单引号转双引号
+    try {
+      const jsonStr = summary
+        .replace(/'/g, '"')
+        .replace(/True/g, 'true')
+        .replace(/False/g, 'false')
+        .replace(/None/g, 'null')
+      parsed = JSON.parse(jsonStr)
+    } catch {
+      // 解析失败，返回原文本
+      return summary
+    }
+  }
+
+  // 提取核心 answer
+  if (parsed?.result?.answer) return parsed.result.answer
+  if (parsed?.answer) return parsed.answer
+  if (parsed?.result?.results) return JSON.stringify(parsed.result.results, null, 2)
+
+  return summary
+})
 const editForm = ref<Record<string, any>>({})
 
 function onNodeClick({ node }: { node: { id: string } }) {
   const target = props.graph?.nodes.find(n => n.id === node.id)
   if (!target) return
+
+  // Answer 节点直接触发聚焦，不弹面板
+  if (target.type === 'Answer') {
+    emit('focus-answer')
+    return
+  }
 
   editingNode.value = target
 
@@ -115,18 +177,15 @@ function onNodeClick({ node }: { node: { id: string } }) {
   if (target.type === 'ToolCall') {
     editForm.value = {
       tool: target.data.tool || '',
-      paramsJson: JSON.stringify(target.data.params || {}, null, 2),
+      queryInput: target.data.params?.query || '',
     }
   } else if (target.type === 'Plan') {
     editForm.value = {
       output: target.data.output || '',
       stepsJson: JSON.stringify(target.data.steps || [], null, 2),
     }
-  } else if (target.type === 'Observe') {
-    editForm.value = {
-      resultSummary: target.data.result_summary || '',
-    }
   }
+  // Observe / Answer 不需要编辑表单
 }
 
 function closeEditor() {
@@ -140,14 +199,9 @@ async function handleRetry() {
   let editedData: Record<string, any> = {}
 
   if (editingNode.value.type === 'ToolCall') {
-    try {
-      editedData = {
-        tool: editForm.value.tool,
-        params: JSON.parse(editForm.value.paramsJson),
-      }
-    } catch {
-      alert('参数 JSON 格式错误')
-      return
+    editedData = {
+      tool: editForm.value.tool,
+      params: { query: editForm.value.queryInput || '' },
     }
   } else if (editingNode.value.type === 'Plan') {
     try {
@@ -158,10 +212,6 @@ async function handleRetry() {
     } catch {
       alert('步骤 JSON 格式错误')
       return
-    }
-  } else if (editingNode.value.type === 'Observe') {
-    editedData = {
-      result_summary: editForm.value.resultSummary,
     }
   }
 
@@ -335,7 +385,72 @@ label {
 .readonly-hint {
   color: #999;
   font-style: italic;
+  margin-top: 8px;
 }
+
+/* 输出预览区域 */
+.output-preview {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.output-preview label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 8px;
+}
+
+.output-content {
+  background: #f8f9fa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  text-align: left;
+  max-height: 300px;
+  overflow-y: auto;
+  color: #333;
+}
+
+.answer-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #333;
+}
+
+.answer-content :deep(h1),
+.answer-content :deep(h2),
+.answer-content :deep(h3) {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+}
+.answer-content :deep(h1) { font-size: 1.1em; }
+.answer-content :deep(h2) { font-size: 1.05em; }
+.answer-content :deep(h3) { font-size: 1em; }
+
+.answer-content :deep(p) { margin: 0.4em 0; }
+.answer-content :deep(code) {
+  background: rgba(0,0,0,0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+}
+.answer-content :deep(pre) {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.answer-content :deep(pre code) { background: none; padding: 0; color: inherit; }
+.answer-content :deep(strong) { font-weight: 600; }
 
 .panel-footer {
   padding: 12px 16px;

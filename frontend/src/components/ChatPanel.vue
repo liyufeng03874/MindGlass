@@ -10,10 +10,11 @@
       <div
         v-for="(msg, idx) in messages"
         :key="idx"
+        :data-msg-index="idx"
         :class="['message', msg.role]"
       >
         <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
-        <div class="bubble" v-if="msg.role === 'agent'" v-html="md.render(msg.content)"></div>
+        <div class="bubble" v-if="msg.role === 'agent'" v-html="md.render(msg.content)" :class="{ highlighted: idx === messages.length - 1 && highlightIndex === messages.length - 1 }"></div>
         <div class="bubble" v-else>{{ msg.content }}</div>
       </div>
       <div v-if="loading" class="message agent">
@@ -53,6 +54,7 @@ const emit = defineEmits<{
 }>()
 
 const inputValue = ref('')
+const highlightIndex = ref<number | null>(null)
 const messagesRef = ref<HTMLElement | null>(null)
 const loading = computed(() => props.disabled)
 
@@ -62,6 +64,24 @@ watch(() => props.messages.length, async () => {
     messagesRef.value.scrollTop = messagesRef.value.scrollHeight
   }
 })
+
+function highlightLastMessage() {
+  if (messagesRef.value && props.messages.length > 0) {
+    // 滚动到最后一条
+    messagesRef.value.scrollTo({
+      top: messagesRef.value.scrollHeight,
+      behavior: 'smooth',
+    })
+    // 高亮最后一条 agent 消息
+    highlightIndex.value = props.messages.length - 1
+    // 2秒后取消高亮
+    setTimeout(() => {
+      highlightIndex.value = null
+    }, 2000)
+  }
+}
+
+defineExpose({ highlightLastMessage })
 
 function handleSend() {
   const query = inputValue.value.trim()
@@ -222,6 +242,34 @@ function handleSend() {
 .thinking {
   color: #999;
   font-style: italic;
+}
+
+/* 高亮动画 */
+.bubble.highlighted {
+  animation: answerHighlight 2s ease;
+}
+
+@keyframes answerHighlight {
+  0% {
+    background: #f0f0f0;
+    transform: scale(1);
+    box-shadow: none;
+  }
+  15% {
+    transform: scale(1.03);
+  }
+  30% {
+    transform: scale(1);
+  }
+  10%, 20%, 30%, 40%, 50% {
+    background: #e3f2fd;
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.3), 0 0 20px rgba(25, 118, 210, 0.15);
+  }
+  100% {
+    background: #f0f0f0;
+    transform: scale(1);
+    box-shadow: none;
+  }
 }
 
 .greeting {
