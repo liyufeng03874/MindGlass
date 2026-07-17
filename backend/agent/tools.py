@@ -111,7 +111,7 @@ async def tool_rag_retrieve(query: str, top_k: int = 5) -> dict:
     POST /api/chat/rag-es
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
                 f"{RAG_API_URL}/api/chat/rag-es",
                 json={"message": query},

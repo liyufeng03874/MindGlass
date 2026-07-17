@@ -41,7 +41,7 @@ export function useAgentGraph() {
       status: 'pending',
       step_index: 0,
       branch_id: null,
-      label: '规划中...pendding',
+      label: '规划中...',
     })
 
     const eventSource = new EventSource(
@@ -176,7 +176,7 @@ export function useAgentGraph() {
       status: 'pending',
       step_index: prevNode.step_index + 1,
       branch_id: prevNode.branch_id,
-      label: nextLabel+'pendding节点',
+      label: nextLabel,
     }
     console.log('-------------------[pushPending] CREATED:', pendingNode)
 

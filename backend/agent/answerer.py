@@ -28,7 +28,7 @@ async def generate_answer(query: str, observations: list[dict], plan_context: st
         if "result" in obs:
             import json
             result_text = json.dumps(obs["result"], ensure_ascii=False, indent=2) if isinstance(obs["result"], dict) else str(obs["result"])
-            context_parts.append(result_text[:500])  # 限制长度
+            context_parts.append(result_text)
         elif "error" in obs:
             context_parts.append(f"错误: {obs['error']}")
 
@@ -41,5 +41,8 @@ async def generate_answer(query: str, observations: list[dict], plan_context: st
 
 请根据以上信息回答用户的问题："""
 
+    import sys
+    print(f"[DEBUG] answerer prompt length: {len(prompt)} chars", file=sys.stderr)
+    print(f"[DEBUG] answerer prompt preview: {prompt[:800]}...", file=sys.stderr)
     result = generate(prompt, system_prompt=ANSWER_SYSTEM_PROMPT)
     return result

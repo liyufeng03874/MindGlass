@@ -22,7 +22,7 @@ from agent.tools import execute_tool
 from agent.answerer import generate_answer
 
 # 超时设置（秒）
-TOOL_TIMEOUT = 30
+TOOL_TIMEOUT = 120
 LLM_TIMEOUT = 60
 
 
@@ -118,7 +118,7 @@ class ReactLoop:
                 data={
                     "source": tc_node.id,
                     "tool": tool_name,
-                    "result_summary": str(tool_result)[:200],
+                    "result_summary": str(tool_result),
                 },
                 status="done",
                 step_index=self.step_index,
@@ -294,7 +294,7 @@ class ReactLoop:
                 data={
                     "source": tc_node.id,
                     "tool": effective_tool,
-                    "result_summary": str(tool_result)[:200],
+                    "result_summary": str(tool_result),
                 },
                 status="done",
                 step_index=self.step_index,
