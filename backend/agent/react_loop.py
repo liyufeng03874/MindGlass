@@ -118,7 +118,7 @@ class ReactLoop:
                 data={
                     "source": tc_node.id,
                     "tool": tool_name,
-                    "result_summary": str(tool_result),
+                    "result_summary": json.dumps(tool_result, ensure_ascii=False),
                 },
                 status="done",
                 step_index=self.step_index,
@@ -294,7 +294,7 @@ class ReactLoop:
                 data={
                     "source": tc_node.id,
                     "tool": effective_tool,
-                    "result_summary": str(tool_result),
+                    "result_summary": json.dumps(tool_result, ensure_ascii=False),
                 },
                 status="done",
                 step_index=self.step_index,

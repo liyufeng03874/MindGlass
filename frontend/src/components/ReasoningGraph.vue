@@ -46,11 +46,12 @@
             placeholder="输入你想查询的内容..."
           />
 
-          <!-- 输出预览 -->
+          <!-- 输出结果（只展示 answer） -->
           <div v-if="toolCallResult" class="output-preview">
             <label>📤 输出结果</label>
-            <pre class="output-content">{{ toolCallResult }}</pre>
+            <div class="answer-content" v-html="md.render(toolCallResult)"></div>
           </div>
+          <p v-else class="readonly-hint">暂无输出结果</p>
         </template>
 
         <!-- Plan 编辑 -->
@@ -119,46 +120,80 @@ const editingNode = ref<AgentNode | null>(null)
 const toolCallResult = computed(() => {
   if (!editingNode.value?.data?.result) return ''
   const r = editingNode.value.data.result
-  if (typeof r === 'string') return r
-  if (r.result?.answer) return r.result.answer;
-  if (r.answer) return r.answer  // 也可能是直接嵌套一层
-  if (Array.isArray(r.results)) {
-    return r.results.map((x: any) => `[${x.title}]\n${x.snippet || x.content || ''}`).join('\n\n---\n\n')
+
+  const results = r.result?.results || r.results
+  const answer = r.result?.answer || r.answer
+
+  const parts: string[] = []
+
+  // 先放 answer 总结
+  if (answer) {
+    parts.push(`**摘要**：${answer}`)
   }
-  try { return JSON.stringify(r, null, 2) } catch { return String(r) }
+
+  // 再分点列出搜索结果
+  if (Array.isArray(results) && results.length > 0) {
+    const items = results.map((x: any, i: number) => {
+      const title = x.title || x.url || '无标题'
+      const snippet = x.snippet || x.content || ''
+      const url = x.url ? ` ([链接](${x.url}))` : ''
+      return `${i + 1}. **${title}**${url}\n${snippet}`
+    }).join('\n\n')
+    parts.push(items)
+  }
+
+  return parts.join('\n\n---\n\n')
 })
 
 const observeResult = computed(() => {
   if (!editingNode.value?.data?.result_summary) return ''
   const summary = editingNode.value.data.result_summary
 
-  // 尝试解析：先试标准 JSON，再试 Python dict 格式（单引号）
-  let parsed: any = null
-
+  // 先试标准 JSON（新数据）
   try {
-    parsed = JSON.parse(summary)
-  } catch {
-    // Python dict -> JSON: 单引号转双引号
-    try {
-      const jsonStr = summary
-        .replace(/'/g, '"')
-        .replace(/True/g, 'true')
-        .replace(/False/g, 'false')
-        .replace(/None/g, 'null')
-      parsed = JSON.parse(jsonStr)
-    } catch {
-      // 解析失败，返回原文本
-      return summary
-    }
+    const parsed = JSON.parse(summary)
+    return buildObserveOutput(parsed)
+  } catch { /* continue */ }
+
+  // 兼容旧数据：Python str(dict) 单引号格式
+  try {
+    // 转义内容中的双引号后再替换
+    const safeStr = summary
+      .replace(/\\"/g, '__DQ__')  // 保护已转义的双引号
+      .replace(/"/g, '__DQ__')    // 保护原始双引号
+      .replace(/'/g, '"')
+      .replace(/__DQ__/g, '"')
+      .replace(/\bTrue\b/g, 'true')
+      .replace(/\bFalse\b/g, 'false')
+      .replace(/\bNone\b/g, 'null')
+    const parsed = JSON.parse(safeStr)
+    return buildObserveOutput(parsed)
+  } catch { /* continue */ }
+
+  return ''
+})
+
+function buildObserveOutput(parsed: any): string {
+  const results = parsed.result?.results
+  const answer = parsed.result?.answer || parsed.answer
+  const parts: string[] = []
+
+  if (answer) {
+    parts.push(`**摘要**：${answer}`)
   }
 
-  // 提取核心 answer
-  if (parsed?.result?.answer) return parsed.result.answer
-  if (parsed?.answer) return parsed.answer
-  if (parsed?.result?.results) return JSON.stringify(parsed.result.results, null, 2)
+  if (Array.isArray(results) && results.length > 0) {
+    const items = results.map((x: any, i: number) => {
+      const title = x.title || x.url || '无标题'
+      const snippet = x.snippet || x.content || ''
+      const url = x.url ? ` ([链接](${x.url}))` : ''
+      return `${i + 1}. **${title}**${url}\n${snippet}`
+    }).join('\n\n')
+    parts.push(items)
+  }
 
-  return summary
-})
+  return parts.join('\n\n---\n\n')
+}
 const editForm = ref<Record<string, any>>({})
 
 function onNodeClick({ node }: { node: { id: string } }) {
@@ -418,6 +453,7 @@ label {
 }
 
 .answer-content {
+  text-align: left;
   font-size: 13px;
   line-height: 1.7;
   color: #333;

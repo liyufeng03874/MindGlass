@@ -123,6 +123,7 @@ function handleSend() {
 }
 
 .bubble {
+  text-align: left;
   max-width: 80%;
   padding: 10px 14px;
   border-radius: 12px;

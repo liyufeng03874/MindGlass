@@ -194,8 +194,8 @@ body {
 }
 
 .left-panel {
-  width: 400px;
-  min-width: 320px;
+  width: 50%;
+  min-width: 640px;
   border-right: 1px solid #e8e8e8;
   background: #fff;
   transition: width 0.3s ease;
