@@ -109,10 +109,55 @@ class ReactLoop:
                 results = await asyncio.gather(*[_exec(idx, s) for idx, s in batch])
                 results.sort(key=lambda x: x[0])
 
+                # 并行组：每个 ToolCall 独立节点，共享一个合并的 Observe
+                tc_nodes = []
                 for idx, s, ok, res in results:
-                    self._emit_toolcall_observe(s, ok, res, observations, parallel_group_id=parallel_group_id, fixed_prev_id=parallel_prev_id)
+                    tool_name = s.get("tool", "search")
+                    tc_node = ReasoningNode(
+                        node_id=_make_node_id(self.step_index, "ToolCall"),
+                        node_type="ToolCall",
+                        data={
+                            "tool": tool_name,
+                            "params": s.get("params", {}),
+                            "result": res,
+                            "description": s.get("description", ""),
+                            "parallel_group_id": parallel_group_id,
+                        },
+                        status="done" if ok else "error",
+                        step_index=self.step_index,
+                        label=f"{tool_name}",
+                    )
+                    self.store.add_node(tc_node)
+                    if parallel_prev_id:
+                        self._add_edge(parallel_prev_id, tc_node.id, edge_type="Parallel")
+                    self._last_node = tc_node
+                    tc_nodes.append(tc_node)
+                    observations.append(res)
                     yield self._emit_last_node()
-                # 并行组整体消耗 2 步：ToolCall 行 + Observe 行
+
+                # 合并 Observe：所有并行 ToolCall → 1 个 Observe
+                merged_results = []
+                for tc in tc_nodes:
+                    merged_results.append(tc.data.get("result", {}))
+
+                obs_node = ReasoningNode(
+                    node_id=_make_node_id(self.step_index, "Observe"),
+                    node_type="Observe",
+                    data={
+                        "source": [tc.id for tc in tc_nodes],
+                        "tool": "search (并行)",
+                        "result_summary": json.dumps(merged_results, ensure_ascii=False),
+                    },
+                    status="done",
+                    step_index=self.step_index + 1,
+                    label="观察结果",
+                )
+                self.store.add_node(obs_node)
+                # 所有 ToolCall → Observe
+                for tc in tc_nodes:
+                    self._add_edge(tc.id, obs_node.id)
+                self._last_node = obs_node
+                yield self._emit_last_node()
                 self.step_index += 2
             else:
                 # 单个工具，串行
@@ -125,6 +170,32 @@ class ReactLoop:
                 self.step_index += 2
 
             i = j
+
+    def _emit_toolcall_only(self, step: dict, success: bool, tool_result: dict, parallel_group_id: Optional[str] = None, fixed_prev_id: Optional[str] = None) -> None:
+        """只生成 ToolCall 节点（并行组中用，Observe 会合并）"""
+        tool_name = step.get("tool", "search")
+        prev_id = fixed_prev_id if fixed_prev_id is not None else self._prev_node_id()
+        tc_step = self.step_index
+
+        tc_node = ReasoningNode(
+            node_id=_make_node_id(self.step_index, "ToolCall"),
+            node_type="ToolCall",
+            data={
+                "tool": tool_name,
+                "params": step.get("params", {}),
+                "result": tool_result,
+                "description": step.get("description", ""),
+                "parallel_group_id": parallel_group_id,
+            },
+            status="done" if success else "error",
+            step_index=tc_step,
+            label=f"{tool_name}",
+        )
+        self.store.add_node(tc_node)
+        if prev_id:
+            edge_type = "Parallel" if parallel_group_id else "Normal"
+            self._add_edge(prev_id, tc_node.id, edge_type=edge_type)
+        self._last_node = tc_node
 
     def _emit_toolcall_observe(self, step: dict, success: bool, tool_result: dict, observations: list, parallel_group_id: Optional[str] = None, fixed_prev_id: Optional[str] = None) -> None:
         """生成 ToolCall + Observe 节点（不 yield，供并行后批量 emit）"""

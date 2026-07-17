@@ -77,8 +77,30 @@ export function useAgentGraph() {
 
         // 后端返回完整图，直接覆盖
         if (event.data.graph?.nodes) {
-          graph.value.nodes = event.data.graph.nodes
-          graph.value.edges = event.data.graph.edges || []
+          const backendNodes = event.data.graph.nodes
+          const oldPendings = graph.value.nodes.filter(n => n.status === 'pending')
+
+          // 对每个 pending，检查后端是否已有足够数量的同 step_index 同类型节点
+          // 如果有，说明该 pending 已被真实节点替代，不再保留
+          const survivingPendings = oldPendings.filter(p => {
+            if (p.step_index === undefined) return true
+            const pendingCount = oldPendings.filter(
+              q => q.step_index === p.step_index && q.type === p.type
+            ).length
+            const realCount = backendNodes.filter(
+              n => n.step_index === p.step_index && n.type === p.type && n.status !== 'pending'
+            ).length
+            // 真实节点数 >= pending数，说明全部被替代，清除
+            return realCount < pendingCount
+          })
+
+          const survivingPendingIds = new Set(survivingPendings.map(n => n.id))
+          const survivingEdges = graph.value.edges.filter(
+            e => survivingPendingIds.has(e.from) || survivingPendingIds.has(e.to)
+          )
+
+          graph.value.nodes = [...backendNodes, ...survivingPendings]
+          graph.value.edges = [...(event.data.graph.edges || []), ...survivingEdges]
         } else {
           graph.value.nodes.push(node)
           const activeNodes = graph.value.nodes.filter(
@@ -94,9 +116,21 @@ export function useAgentGraph() {
           }
         }
 
-        // 追加 1 个 pending
-        if (node.type !== 'Answer') {
+        // 追加 pending 节点
+        if (node.type === 'Plan') {
           pushPendingNode(node)
+        } else if (event.data.graph?.nodes && node.type === 'Observe') {
+          const backendNodes = event.data.graph.nodes
+          const planNode = backendNodes.find(n => n.type === 'Plan' && n.status !== 'pending')
+          const totalSteps = planNode?.data?.steps?.length || 0
+          const realToolCalls = backendNodes.filter(
+            n => n.type === 'ToolCall' && n.status !== 'pending'
+          ).length
+
+          // 所有 ToolCall 已完成 → 推 Answer pending（仅此一次）
+          if (realToolCalls >= totalSteps && totalSteps > 0) {
+            pushPendingAnswer(node)
+          }
         }
 
         if (node.type === 'Answer') {
@@ -138,42 +172,44 @@ export function useAgentGraph() {
     const steps = planNode.data.steps as Array<{ tool: string }>
     const totalSteps = steps.length
 
-    // 并行场景：用已完成的 Observe 数量判断
-    const completedObs = graph.value.nodes.filter(
-      n => n.type === 'Observe' && n.status === 'done'
-    ).length
+    if (prevNode.type === 'Plan') {
+      // Plan 完成后，一次性创建所有 pending ToolCall 节点（并行组）
+      const parallelGroupId = `pg_pending_${Date.now().toString(36)}`
+      steps.forEach((step, idx) => {
+        pendingIdCounter++
+        const pendingNode: AgentNode = {
+          id: `frontend_pending_${pendingIdCounter}`,
+          type: 'ToolCall',
+          data: { pending: true, label: step.tool, parallel_group_id: parallelGroupId },
+          status: 'pending',
+          step_index: 1,  // 并行组共享 step_index
+          branch_id: null,
+          label: step.tool,
+        }
+        graph.value.nodes.push(pendingNode)
+        graph.value.edges.push({
+          from: prevNode.id,
+          to: pendingNode.id,
+          type: 'Pending',
+        })
+      })
+      graph.value.nodes = [...graph.value.nodes]
+      graph.value.edges = [...graph.value.edges]
+      return
+    }
 
     let nextType: string
     let nextLabel = ''
 
-    if (prevNode.type === 'Plan') {
-      nextType = steps.length > 0 ? 'ToolCall' : 'Answer'
-      nextLabel = steps.length > 0 ? steps[0].tool : '最终回答'
-    } else if (prevNode.type === 'ToolCall') {
+    if (prevNode.type === 'ToolCall') {
       nextType = 'Observe'
       nextLabel = '观察结果'
     } else if (prevNode.type === 'Observe') {
-      if (completedObs >= totalSteps) {
-        // 所有工具已完成 → Answer
-        nextType = 'Answer'
-        nextLabel = '最终回答'
-      } else {
-        // 还有步骤未执行
-        const nextStep = steps[completedObs]
-        if (nextStep) {
-          nextType = 'ToolCall'
-          nextLabel = nextStep.tool
-        } else {
-          nextType = 'Answer'
-          nextLabel = '最终回答'
-        }
-      }
+      nextType = 'Answer'
+      nextLabel = '最终回答'
     } else {
       return
     }
-
-    // 只拦 pending ToolCall：所有工具已完成时不推 ToolCall
-    if (nextType === 'ToolCall' && completedObs >= totalSteps) return
 
     pendingIdCounter++
     const pendingNode: AgentNode = {
@@ -190,7 +226,30 @@ export function useAgentGraph() {
     graph.value.edges.push({
       from: prevNode.id,
       to: pendingNode.id,
-      type: 'Pending' as any,
+      type: 'Pending',
+    })
+    graph.value.nodes = [...graph.value.nodes]
+    graph.value.edges = [...graph.value.edges]
+  }
+
+  /** 只推 Answer pending */
+  function pushPendingAnswer(prevNode: AgentNode) {
+    pendingIdCounter++
+    const pendingNode: AgentNode = {
+      id: `frontend_pending_${pendingIdCounter}`,
+      type: 'Answer',
+      data: { pending: true, label: '最终回答' },
+      status: 'pending',
+      step_index: prevNode.step_index + 1,
+      branch_id: prevNode.branch_id,
+      label: '最终回答',
+    }
+
+    graph.value.nodes.push(pendingNode)
+    graph.value.edges.push({
+      from: prevNode.id,
+      to: pendingNode.id,
+      type: 'Pending',
     })
     graph.value.nodes = [...graph.value.nodes]
     graph.value.edges = [...graph.value.edges]

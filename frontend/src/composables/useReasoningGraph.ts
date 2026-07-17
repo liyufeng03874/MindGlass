@@ -17,6 +17,7 @@ const EDGE_STYLES: Record<string, { color: string; animated: boolean; dashed: bo
   Fallback:{ color: '#ff4d4f', animated: true,  dashed: true },
   Branch:  { color: '#722ed1', animated: true,  dashed: true },
   Parallel:{ color: '#52c41a', animated: false, dashed: false },
+  Pending: { color: '#fa8c16', animated: true,  dashed: true },
 }
 
 export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
@@ -129,18 +130,19 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
 
       const style = EDGE_STYLES[edge.type] || EDGE_STYLES.Normal
       const isBranchEdge = edge.type === 'Branch'
+      const isPendingEdge = edge.type === 'Pending'
 
       edges.push({
         id: `edge_${idx}`,
         source: edge.from,
         target: edge.to,
-        animated: isBranchEdge ? false : style.animated,
+        animated: isBranchEdge ? false : isPendingEdge ? style.animated : style.animated,
         style: {
           stroke: isBranchEdge ? '#d9d9d9' : style.color,
           strokeWidth: isBranchEdge ? 1 : 2,
           ...(isBranchEdge ? { strokeDasharray: '4,4' } : (style.dashed ? { strokeDasharray: '5,5' } : {})),
         },
-        markerEnd: isBranchEdge
+        markerEnd: isBranchEdge || isPendingEdge
           ? undefined
           : {
               width: 12,
