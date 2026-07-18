@@ -10,23 +10,31 @@
           <input
             v-model="demoInput"
             class="demo-input"
-            placeholder="demo_7"
+            placeholder="1"
             @keydown.enter="loadTestData(demoInput || undefined)"
           />
           <button
             class="toggle-graph-btn"
             @click="loadTestData(demoInput || undefined)"
+            :disabled="demoLoaded || loadingDemo"
           >
             📦 加载测试数据
           </button>
         </template>
-        <button
-          v-else
-          class="toggle-graph-btn"
-          @click="showGraph = !showGraph"
-        >
-          {{ showGraph ? '👁️ 隐藏思维' : '💡 思维可视化' }}
-        </button>
+        <template v-else>
+          <button
+            class="clear-btn"
+            @click="clearDemo"
+          >
+            🗑️ 清空
+          </button>
+          <button
+            class="toggle-graph-btn"
+            @click="showGraph = !showGraph"
+          >
+            {{ showGraph ? '👁️ 隐藏思维' : '💡 思维可视化' }}
+          </button>
+        </template>
       </div>
     </header>
 
@@ -60,6 +68,8 @@ const { graph, status, connected, messages, isRunning, sendMessage, retryFrom } 
 const showGraph = ref(false)
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
 const demoInput = ref('')
+const demoLoaded = ref(false)
+const loadingDemo = ref(false)
 const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解复杂问题、调用工具搜索、生成结构化回答。试试问我点什么吧～'
 
   function onSend(query: string) {
@@ -81,8 +91,11 @@ function onFocusAnswer() {
 }
 
 function loadTestData(demoName: string = 'demo_7') {
+  if (demoLoaded.value) return // 已加载过，必须先清空
+
+  loadingDemo.value = true
   // 调用后端加载 demo 数据（默认 demo_7，可通过参数指定如 demo_8）
-  fetch(`http://localhost:8002/api/load-demo?demo=${demoName}`, { method: 'POST' })
+  fetch(`http://localhost:8002/api/load-demo?demo=demo_${demoName}`, { method: 'POST' })
     .then(res => res.json())
     .then(() => {
       // 加载完成后获取图数据
@@ -92,6 +105,7 @@ function loadTestData(demoName: string = 'demo_7') {
     .then(data => {
       graph.value = data
       showGraph.value = true
+      demoLoaded.value = true
 
       // 提取 Answer 节点的 output 填充到聊天
       const answerNode = data.nodes?.find((n: any) => n.type === 'Answer' && n.status !== 'replaced')
@@ -111,6 +125,17 @@ function loadTestData(demoName: string = 'demo_7') {
     .catch(() => {
       status.value = '❌ 加载测试数据失败'
     })
+    .finally(() => {
+      loadingDemo.value = false
+    })
+}
+
+function clearDemo() {
+  graph.value = { nodes: [], edges: [] }
+  messages.value = []
+  showGraph.value = false
+  demoLoaded.value = false
+  status.value = '就绪'
 }
 </script>
 
@@ -203,6 +228,22 @@ body {
 .toggle-graph-btn:hover {
   background: #e8e8e8;
   color: #333;
+}
+
+.clear-btn {
+  padding: 4px 12px;
+  background: #ff4d4f;
+  border: 1px solid #ff4d4f;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #fff;
+  transition: all 0.2s;
+}
+
+.clear-btn:hover {
+  background: #ff7875;
+  border-color: #ff7875;
 }
 
 @keyframes pulse {

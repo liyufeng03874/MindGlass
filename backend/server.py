@@ -109,11 +109,23 @@ async def retry_from_graph(request: dict):
 
 
 @app.post("/api/load-demo")
-def load_demo(demo: str = Query(default="demo_7")):
-    """加载 demo 静态数据，默认 demo_7，可通过 ?demo=demo_8 指定"""
+def load_demo(demo: str = Query(default="1")):
+    """加载 demo 静态数据，支持数字编号（如 1、2、3）或完整文件名"""
     import os
-    demo_name = demo if demo.endswith(".txt") else f"{demo}.txt"
-    demo_path = os.path.join(os.path.dirname(__file__), "docs", demo_name)
+    import re
+    docs_dir = os.path.join(os.path.dirname(__file__), "docs")
+
+    # 如果传入的是纯数字，匹配 demo_N(描述).txt 格式
+    if re.match(r'^\d+$', demo):
+        pattern = re.compile(rf'^demo_{re.escape(demo)}\(.*\)\.txt$')
+        matched = [f for f in os.listdir(docs_dir) if pattern.match(f)]
+        if not matched:
+            raise HTTPException(status_code=404, detail=f"demo_{demo} 不存在")
+        demo_name = matched[0]
+    else:
+        demo_name = demo if demo.endswith(".txt") else f"{demo}.txt"
+
+    demo_path = os.path.join(docs_dir, demo_name)
     if not os.path.exists(demo_path):
         raise HTTPException(status_code=404, detail=f"{demo_name} 不存在")
 
