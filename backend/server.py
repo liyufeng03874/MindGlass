@@ -78,6 +78,37 @@ def retry_from(request: dict):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.post("/api/retry_from_graph")
+async def retry_from_graph(request: dict):
+    """
+    方案 C 并行重试：接收完整图数据 + 新工具参数，只重跑新工具，融合后送 Answer
+    body: {
+        "step_index": 1,
+        "full_graph": { nodes: [...], edges: [...] },
+        "new_tool_calls": [{ "tool": "search", "params": {...} }],
+        "preserved_observations": [...],
+        "query": "...",
+        "plan_info": "..."
+    }
+    """
+    step_index = request.get("step_index")
+    new_tool_calls = request.get("new_tool_calls", [])
+    preserved_observations = request.get("preserved_observations", [])
+    query = request.get("query", "")
+    plan_info = request.get("plan_info", "")
+
+    if step_index is None or not new_tool_calls:
+        raise HTTPException(status_code=400, detail="step_index and new_tool_calls are required")
+
+    loop = ReactLoop(_store)
+
+    async def event_stream():
+        async for event in loop.retry_from_graph(step_index, new_tool_calls, preserved_observations, query, plan_info):
+            yield event
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/load-demo")
 def load_demo():
     """加载 demo_6.txt 作为测试数据"""

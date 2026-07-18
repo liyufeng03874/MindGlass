@@ -504,3 +504,80 @@ class ReactLoop:
         else:
             yield self._emit("error", {"message": f"不支持重试 {node.type} 节点，请从 ToolCall 节点重试"})
             yield self._emit("run_complete", {"graph": self.store.to_dict()})
+
+    async def retry_from_graph(self, step_index: int, new_tool_calls: list[dict], preserved_observations: list, query: str, plan_info: str) -> AsyncGenerator[str, None]:
+        """
+        方案 C：并行重试——只重跑新工具，融合旧 observations，直接送 Answer。
+        不截断、不重新规划。
+        
+        Args:
+            step_index: 重试的 step_index
+            new_tool_calls: [{"tool": "search", "params": {...}}, ...]
+            preserved_observations: 保留的旧工具结果列表
+            query: 原始用户查询
+            plan_info: 规划思路
+        """
+        # 找到重试起点的 prev_id（step_index 之前的最后一个非 branch 节点）
+        prev_id = None
+        for n in reversed(self.store.nodes):
+            if n.status not in ("discarded", "branch") and n.step_index < step_index:
+                prev_id = n.id
+                break
+
+        self.step_index = step_index
+        observations = list(preserved_observations)  # 复制旧 observations
+
+        # 执行新工具，每个独立生成 ToolCall + Observe
+        for idx, tc in enumerate(new_tool_calls):
+            tool_name = tc.get("tool", "search")
+            params = tc.get("params", {})
+
+            yield self._emit("status", {"message": f"🔧 重新执行 {idx+1}/{len(new_tool_calls)}: {tool_name}"})
+            success, tool_result = await self._safe_tool_call(tool_name, params)
+
+            # ToolCall 节点
+            tc_node = ReasoningNode(
+                node_id=_make_node_id(self.step_index, "ToolCall"),
+                node_type="ToolCall",
+                data={
+                    "tool": tool_name,
+                    "params": params,
+                    "result": tool_result,
+                    "description": tc.get("description", ""),
+                },
+                status="done" if success else "error",
+                step_index=self.step_index,
+                label=f"{tool_name}（重试）",
+            )
+            self.store.add_node(tc_node)
+            if prev_id:
+                self._add_edge(prev_id, tc_node.id)
+            yield self._emit("node_complete", {"node": tc_node.to_dict(), "graph": self.store.to_dict()})
+            prev_id = tc_node.id
+            self.step_index += 1
+
+            # Observe 节点
+            obs_node = ReasoningNode(
+                node_id=_make_node_id(self.step_index, "Observe"),
+                node_type="Observe",
+                data={
+                    "source": tc_node.id,
+                    "tool": tool_name,
+                    "result_summary": json.dumps(tool_result, ensure_ascii=False),
+                },
+                status="done",
+                step_index=self.step_index,
+                label="观察结果（重试）",
+            )
+            self.store.add_node(obs_node)
+            self._add_edge(tc_node.id, obs_node.id)
+            yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
+
+            observations.append(tool_result)
+            prev_id = obs_node.id
+            self.step_index += 1
+
+        # 融合后直接送 Answer
+        yield self._emit("status", {"message": "✍️ 正在生成回答（融合新旧结果）..."})
+        async for event in self._generate_answer(query, observations, plan_info):
+            yield event

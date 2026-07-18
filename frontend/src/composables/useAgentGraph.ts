@@ -257,6 +257,18 @@ export function useAgentGraph() {
 
   /** 从指定 step_index 重试（支持编辑后重跑） */
   async function retryFrom(stepIndex: number, editedData?: Record<string, any>) {
+    // 检测：如果 stepIndex 对应的是并行组的 ToolCall，走方案 C
+    const currentNode = graph.value.nodes.find(
+      n => n.step_index === stepIndex && n.type === 'ToolCall' && n.status !== 'pending'
+    )
+    const pgId = currentNode?.data?.parallel_group_id
+
+    if (pgId) {
+      // 方案 C：并行重试，只重跑被点击的那个
+      return retryFromGraph(stepIndex, editedData)
+    }
+
+    // 普通串行重试
     status.value = '🔄 正在重试...'
     connected.value = true
     isRunning.value = true
@@ -306,6 +318,100 @@ export function useAgentGraph() {
     }
   }
 
+  /** 方案 C：并行重试——只重跑被点击的工具，融合旧结果 */
+  async function retryFromGraph(stepIndex: number, editedData?: Record<string, any>) {
+    status.value = '🔄 正在并行重试...'
+    connected.value = true
+    isRunning.value = true
+
+    // 找到被点击的节点
+    const currentNode = graph.value.nodes.find(
+      n => n.step_index === stepIndex && n.type === 'ToolCall' && n.status !== 'pending'
+    )
+    if (!currentNode) {
+      status.value = '❌ 未找到重试节点'
+      connected.value = false
+      isRunning.value = false
+      return
+    }
+
+    const pgId = currentNode.data?.parallel_group_id
+
+    // 获取同一并行组的其他 ToolCall 结果（排除被点击的那个）
+    const groupToolCalls = graph.value.nodes.filter(
+      n => n.data?.parallel_group_id === pgId && n.type === 'ToolCall' && n.status !== 'pending' && n.id !== currentNode.id
+    )
+
+    // 收集旧 observations
+    const preservedObservations = groupToolCalls
+      .map(n => n.data?.result)
+      .filter(Boolean)
+
+    // 构建新 ToolCall 参数
+    const newToolCalls = [{
+      tool: editedData?.tool || currentNode.data?.tool || 'search',
+      params: {
+        query: editedData?.queryInput || currentNode.data?.params?.query || '',
+      },
+      description: currentNode.data?.description || '',
+    }]
+
+    // 获取 query 和 plan_info
+    const planNode = graph.value.nodes.find(n => n.type === 'Plan' && n.status !== 'pending')
+    const query = planNode?.data?.input || ''
+    const planInfo = planNode?.data?.output || ''
+
+    const response = await fetch(`${API_BASE}/api/retry_from_graph`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        step_index: stepIndex,
+        new_tool_calls: newToolCalls,
+        preserved_observations: preservedObservations,
+        query,
+        plan_info: planInfo,
+      }),
+    })
+
+    if (!response.ok) {
+      status.value = `❌ 重试失败: HTTP ${response.status}`
+      connected.value = false
+      isRunning.value = false
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      status.value = '❌ SSE 读取失败'
+      connected.value = false
+      isRunning.value = false
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const parsed = JSON.parse(line.slice(6)) as SSEEvent
+            handleEvent(parsed)
+          } catch (e) {
+            console.error('SSE parse error:', e)
+          }
+        }
+      }
+    }
+  }
+
   return {
     graph,
     status,
@@ -314,6 +420,7 @@ export function useAgentGraph() {
     messages,
     sendMessage,
     retryFrom,
+    retryFromGraph,
     pushPendingNode,
   }
 }
