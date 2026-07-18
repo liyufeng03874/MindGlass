@@ -94,7 +94,7 @@ function loadTestData(demoName: string = 'demo_7') {
       showGraph.value = true
 
       // 提取 Answer 节点的 output 填充到聊天
-      const answerNode = data.nodes?.find((n: any) => n.type === 'Answer')
+      const answerNode = data.nodes?.find((n: any) => n.type === 'Answer' && n.status !== 'replaced')
       if (answerNode?.data?.output) {
         messages.value.push({
           role: 'user',
