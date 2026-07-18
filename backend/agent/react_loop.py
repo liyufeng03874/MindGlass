@@ -513,13 +513,10 @@ class ReactLoop:
         """
         observations = []
 
-        # ── 1. 旧节点：标记 branch，收集旧结果 ──
+        # ── 1. 旧节点：标记 branch，不收集旧结果 ──
+        # 旧结果不应加入 observations，因为重试分支意味着旧 query 被替换
         branch_ids = set()
         for node_data in old_nodes:
-            node_result = node_data.get("data", {}).get("result")
-            if node_result:
-                observations.append(node_result)
-
             existing = self.store.get_node_by_id(node_data["id"])
             if existing:
                 existing.status = "branch"
@@ -590,7 +587,8 @@ class ReactLoop:
             # ── Observe 节点：融合所有未废弃同组 ToolCall 的结果 ──
             self.step_index += 1
 
-            # 收集同组所有未废弃的 ToolCall 结果
+            # 收集同组未废弃、未被替换的 ToolCall 结果
+            # replaced 节点的旧结果不应融合——用户已经替换了该 query
             fused_results = [tool_result]  # 新结果
             pg_id = tc_data.get("parallel_group_id")
             if pg_id:
@@ -620,18 +618,31 @@ class ReactLoop:
             # 新 ToolCall → 新 Observe
             self._add_edge(tc_node.id, obs_node.id)
 
-            # 同组未废弃的其他 ToolCall 也连到新 Observe
+            # 同组未废弃、未被替换的其他 ToolCall 也连到新 Observe
+            # replaced 节点不参与融合，保持视觉连接但数据不参与
             if pg_id:
                 for n in self.store.nodes:
                     if (n.data.get("parallel_group_id") == pg_id
                             and n.id != tc_node.id
-                            and n.status not in ("branch", "discarded", "replaced")
+                            and n.status not in ("branch", "discarded")
                             and n.type == "ToolCall"):
                         self._add_edge(n.id, obs_node.id)
 
             yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
 
             observations.append(tool_result)
+
+            # 同组其他未被替换的 ToolCall 的结果加入 observations
+            # replaced 节点的结果不加入——已被用户替换
+            if pg_id:
+                for n in self.store.nodes:
+                    if (n.data.get("parallel_group_id") == pg_id
+                            and n.status not in ("branch", "discarded", "replaced")
+                            and n.type == "ToolCall"
+                            and n.data.get("result")
+                            and n.data["result"] not in observations):
+                        observations.append(n.data["result"])
+
             prev_id = obs_node.id
             self.step_index += 1
 
