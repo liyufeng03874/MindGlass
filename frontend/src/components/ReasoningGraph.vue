@@ -174,6 +174,30 @@ const observeResult = computed(() => {
 })
 
 function buildObserveOutput(parsed: any): string {
+  // 合并 Observe 格式：列表 [{result: {results: [...], answer: "..."}}, ...]
+  if (Array.isArray(parsed)) {
+    const parts: string[] = []
+    parsed.forEach((item: any, idx: number) => {
+      const itemResult = item.result || item
+      const answer = itemResult.answer || ''
+      const results = itemResult.results || []
+      if (answer) {
+        parts.push(`**摘要**：${answer}`)
+      }
+      if (Array.isArray(results) && results.length > 0) {
+        const items = results.map((x: any, i: number) => {
+          const title = x.title || x.url || '无标题'
+          const snippet = x.snippet || x.content || ''
+          const url = x.url ? ` ([链接](${x.url}))` : ''
+          return `${i + 1}. **${title}**${url}\n${snippet}`
+        }).join('\n\n')
+        parts.push(items)
+      }
+    })
+    return parts.join('\n\n---\n\n')
+  }
+
+  // 单个 Observe 格式：{result: {results: [...], answer: "..."}}
   const results = parsed.result?.results
   const answer = parsed.result?.answer || parsed.answer
   const parts: string[] = []

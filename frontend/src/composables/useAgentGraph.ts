@@ -66,7 +66,7 @@ export function useAgentGraph() {
   }
 
   function handleEvent(event: SSEEvent) {
-    // console.log('[SSE]', event.type, event.data)
+    console.log('[SSE]', event.type, event.data)
     switch (event.type) {
       case 'status':
         status.value = event.data.message
