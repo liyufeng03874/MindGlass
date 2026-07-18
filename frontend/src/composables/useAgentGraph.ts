@@ -256,16 +256,13 @@ export function useAgentGraph() {
   }
 
   /** 从指定 step_index 重试（支持编辑后重跑） */
-  async function retryFrom(stepIndex: number, nodeId: string, editedData?: Record<string, any>) {
-    // 检测：如果 stepIndex 对应的是并行组的 ToolCall，走方案 C
-    const currentNode = graph.value.nodes.find(
-      n => n.id === nodeId && n.type === 'ToolCall' && n.status !== 'pending'
-    )
-    const pgId = currentNode?.data?.parallel_group_id
+  async function retryFrom(stepIndex: number, originalNode: any, editedData?: Record<string, any>) {
+    // 检测：如果是 ToolCall 类型且属于并行组，走方案 C
+    const isParallelGroup = originalNode?.data?.parallel_group_id
 
-    if (pgId) {
+    if (isParallelGroup) {
       // 方案 C：并行重试，只重跑被点击的那个
-      return retryFromGraph(stepIndex, editedData)
+      return retryFromGraph(stepIndex, originalNode, editedData)
     }
 
     // 普通串行重试
@@ -318,43 +315,35 @@ export function useAgentGraph() {
     }
   }
 
-  /** 方案 C：并行重试——只重跑被点击的工具，融合旧结果 */
-  async function retryFromGraph(stepIndex: number, nodeId: string, editedData?: Record<string, any>) {
+  /** 方案 C：并行重试——发送完整上下文+标记，后端融合 */
+  async function retryFromGraph(stepIndex: number, originalNode: any, editedData?: Record<string, any>) {
     status.value = '🔄 正在并行重试...'
     connected.value = true
     isRunning.value = true
 
-    // 找到被点击的节点
-    const currentNode = graph.value.nodes.find(
-      n => n.id === nodeId && n.type === 'ToolCall' && n.status !== 'pending'
-    )
-    if (!currentNode) {
-      status.value = '❌ 未找到重试节点'
-      connected.value = false
-      isRunning.value = false
-      return
-    }
+    const pgId = originalNode.data?.parallel_group_id
 
-    const pgId = currentNode.data?.parallel_group_id
-
-    // 获取同一并行组的其他 ToolCall 结果（排除被点击的那个）
+    // 获取同一并行组的其他 ToolCall（保留的旧节点）
     const groupToolCalls = graph.value.nodes.filter(
-      n => n.data?.parallel_group_id === pgId && n.type === 'ToolCall' && n.status !== 'pending' && n.id !== currentNode.id
+      n => n.data?.parallel_group_id === pgId && n.type === 'ToolCall' && n.status !== 'pending' && n.id !== originalNode.id
     )
 
-    // 收集旧 observations
-    const preservedObservations = groupToolCalls
-      .map(n => n.data?.result)
-      .filter(Boolean)
+    // 旧节点加 original: 'old' 标记
+    const oldNodes = groupToolCalls.map(n => ({
+      ...n,
+      data: { ...n.data, original: 'old' as const },
+    }))
 
-    // 构建新 ToolCall 参数
-    const newToolCalls = [{
-      tool: editedData?.tool || currentNode.data?.tool || 'search',
-      params: {
-        query: editedData?.queryInput || currentNode.data?.params?.query || '',
+    // 新节点：基于原节点 + 编辑后的数据，加 original: 'new' 标记
+    const newNode = {
+      ...originalNode,
+      data: {
+        ...originalNode.data,
+        tool: editedData?.tool || originalNode.data?.tool,
+        params: editedData?.params || originalNode.data?.params,
+        original: 'new' as const,
       },
-      description: currentNode.data?.description || '',
-    }]
+    }
 
     // 获取 query 和 plan_info
     const planNode = graph.value.nodes.find(n => n.type === 'Plan' && n.status !== 'pending')
@@ -366,8 +355,8 @@ export function useAgentGraph() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         step_index: stepIndex,
-        new_tool_calls: newToolCalls,
-        preserved_observations: preservedObservations,
+        old_nodes: oldNodes,
+        new_nodes: [newNode],
         query,
         plan_info: planInfo,
       }),

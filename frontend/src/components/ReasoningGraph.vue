@@ -255,6 +255,9 @@ function closeEditor() {
 async function handleRetry() {
   if (!editingNode.value) return
 
+  // 拷贝原节点完整信息（哥哥的方案：新旧都加标记）
+  const originalNode = JSON.parse(JSON.stringify(editingNode.value))
+
   let editedData: Record<string, any> = {}
 
   if (editingNode.value.type === 'ToolCall') {
@@ -274,7 +277,8 @@ async function handleRetry() {
     }
   }
 
-  emit('retry', editingNode.value.step_index, editingNode.value.id, editedData)
+  // 传递：原节点完整副本 + 编辑后的新数据
+  emit('retry', editingNode.value.step_index, originalNode, editedData)
   closeEditor()
 }
 

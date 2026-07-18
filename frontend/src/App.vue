@@ -62,8 +62,8 @@ const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解
   }
 }
 
-function onRetry(stepIndex: number, nodeId: string, editedData: Record<string, any>) {
-  retryFrom(stepIndex, nodeId, editedData)
+function onRetry(stepIndex: number, originalNode: any, editedData: Record<string, any>) {
+  retryFrom(stepIndex, originalNode, editedData)
 }
 
 function onFocusAnswer() {

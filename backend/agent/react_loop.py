@@ -505,37 +505,64 @@ class ReactLoop:
             yield self._emit("error", {"message": f"不支持重试 {node.type} 节点，请从 ToolCall 节点重试"})
             yield self._emit("run_complete", {"graph": self.store.to_dict()})
 
-    async def retry_from_graph(self, step_index: int, new_tool_calls: list[dict], preserved_observations: list, query: str, plan_info: str) -> AsyncGenerator[str, None]:
+    async def retry_from_graph(self, step_index: int, old_nodes: list[dict], new_nodes: list[dict], query: str, plan_info: str) -> AsyncGenerator[str, None]:
         """
-        方案 C：并行重试——只重跑新工具，融合旧 observations，直接送 Answer。
-        不截断、不重新规划。
+        方案 C：并行重试——前端发旧标记节点+新标记节点，后端根据标记融合。
+        旧节点灰色保留为废弃分支，新节点执行后融合 observations 送 Answer。
         
         Args:
             step_index: 重试的 step_index
-            new_tool_calls: [{"tool": "search", "params": {...}}, ...]
-            preserved_observations: 保留的旧工具结果列表
+            old_nodes: 保留的旧节点列表（data.original='old'），灰色废弃分支
+            new_nodes: 新节点列表（data.original='new'），需要执行
             query: 原始用户查询
             plan_info: 规划思路
         """
-        # 找到重试起点的 prev_id（step_index 之前的最后一个非 branch 节点）
+        observations = []
         prev_id = None
+
+        # 找到 step_index 之前的最后一个非 branch 节点
         for n in reversed(self.store.nodes):
             if n.status not in ("discarded", "branch") and n.step_index < step_index:
                 prev_id = n.id
                 break
 
         self.step_index = step_index
-        observations = list(preserved_observations)  # 复制旧 observations
 
-        # 执行新工具，每个独立生成 ToolCall + Observe
-        for idx, tc in enumerate(new_tool_calls):
-            tool_name = tc.get("tool", "search")
-            params = tc.get("params", {})
+        # 处理旧节点：加为 branch/灰色保留，不执行，但提取其结果作为旧 observation
+        for node_data in old_nodes:
+            node_type = node_data.get("type", "ToolCall")
+            node_result = node_data.get("data", {}).get("result")
+            node_id = node_data.get("id", _make_node_id(self.step_index, node_type))
 
-            yield self._emit("status", {"message": f"🔧 重新执行 {idx+1}/{len(new_tool_calls)}: {tool_name}"})
+            # 旧节点作为灰色废弃分支添加到图中
+            old_node = ReasoningNode(
+                node_id=node_id,
+                node_type=node_type,
+                data={**node_data.get("data", {}), "branch": True},
+                status="branch",  # 灰色废弃分支
+                step_index=self.step_index,
+                label=f"{node_data.get('label', node_type)}（废弃）",
+            )
+            self.store.add_node(old_node)
+            if prev_id:
+                self._add_edge(prev_id, old_node.id)
+            prev_id = old_node.id
+
+            # 提取旧结果作为 observation
+            if node_result:
+                observations.append(node_result)
+
+            self.step_index += 1
+
+        # 处理新节点：执行 + 创建 Observe
+        for node_data in new_nodes:
+            tool_name = node_data.get("data", {}).get("tool", "search")
+            params = node_data.get("data", {}).get("params", {})
+
+            yield self._emit("status", {"message": f"🔧 重新执行: {tool_name}"})
             success, tool_result = await self._safe_tool_call(tool_name, params)
 
-            # ToolCall 节点
+            # 新 ToolCall 节点
             tc_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "ToolCall"),
                 node_type="ToolCall",
@@ -543,7 +570,7 @@ class ReactLoop:
                     "tool": tool_name,
                     "params": params,
                     "result": tool_result,
-                    "description": tc.get("description", ""),
+                    "description": node_data.get("data", {}).get("description", ""),
                 },
                 status="done" if success else "error",
                 step_index=self.step_index,
