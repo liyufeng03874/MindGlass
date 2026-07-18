@@ -1,7 +1,8 @@
 import {ref} from 'vue'
 import type {AgentNode, AgentEdge, ReasoningGraph, SSEEvent} from '@/types/agent'
 
-const API_BASE = 'http://localhost:8002'
+// API 地址：生产环境通过 nginx 反代 /api，开发环境可覆盖 VITE_API_BASE_URL
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
 let pendingIdCounter = 0
 

@@ -136,7 +136,7 @@ function loadTestData(demoName: string = '1') {
 
   loadingDemo.value = true
   // 调用后端加载 demo 数据，直接返回 graph
-  fetch(`http://localhost:8002/api/load-demo?demo=${demoName}`, { method: 'POST' })
+  fetch(`${import.meta.env.VITE_API_BASE_URL || '/api'}/load-demo?demo=${demoName}`, { method: 'POST' })
     .then(res => res.json())
     .then(data => {
       graph.value = data.graph
