@@ -508,33 +508,52 @@ class ReactLoop:
     async def retry_from_graph(self, step_index: int, old_nodes: list[dict], new_nodes: list[dict], query: str, plan_info: str) -> AsyncGenerator[str, None]:
         """
         方案 C：并行重试——前端发被编辑的旧节点+新节点，后端融合。
-        只有被编辑的节点变成废弃分支（推远 step=999），新节点占据原位置。
-        同组其他并行节点不动。
+        旧节点标记 branch，其下游 Observe/Answer 级联标记 replaced。
+        新 Observe 接收所有未废弃同组 ToolCall 的边。
         """
         observations = []
 
-        # 旧节点（被编辑的那个）：先找到并标记为 branch，推远到 step 999
+        # ── 1. 旧节点：标记 branch，收集旧结果 ──
+        branch_ids = set()
         for node_data in old_nodes:
             node_result = node_data.get("data", {}).get("result")
             if node_result:
                 observations.append(node_result)
 
-            # 在 store 里找到原节点，直接修改它
             existing = self.store.get_node_by_id(node_data["id"])
             if existing:
                 existing.status = "branch"
-                # step_index 保持不变，和同组节点在同一层
                 existing.data["branch"] = True
                 existing.label = f"{node_data.get('label', node_data['type'])}（废弃）"
+                branch_ids.add(existing.id)
                 yield self._emit("node_complete", {"node": existing.to_dict(), "graph": self.store.to_dict()})
 
-        # 新节点：占据原 step_index 位置
+        # ── 2. 级联标记：从 branch 节点出发，标记所有下游 Observe/Answer 为 replaced ──
+        replaced_ids = set()
+        to_visit = list(branch_ids)
+        while to_visit:
+            current_id = to_visit.pop(0)
+            # 找所有从 current_id 出发的边
+            for edge in self.store.edges:
+                if edge.from_id == current_id:
+                    target = self.store.get_node_by_id(edge.to_id)
+                    if target and target.status not in ("branch", "replaced"):
+                        target.status = "replaced"
+                        target.data["replaced"] = True
+                        # Observe/Answer 加后缀
+                        if target.type in ("Observe", "Answer"):
+                            target.label = f"{target.label or target.type}（废弃）"
+                        replaced_ids.add(target.id)
+                        yield self._emit("node_complete", {"node": target.to_dict(), "graph": self.store.to_dict()})
+                        to_visit.append(target.id)
+
+        # ── 3. 新节点：占据原 step_index ──
         self.step_index = step_index
 
-        # 找到 prev_id
+        # 找到 prev_id（Plan 或上一个非废弃节点）
         prev_id = None
         for n in reversed(self.store.nodes):
-            if n.status not in ("discarded", "branch") and n.step_index < step_index:
+            if n.status not in ("discarded", "branch", "replaced") and n.step_index < step_index:
                 prev_id = n.id
                 break
 
@@ -552,7 +571,6 @@ class ReactLoop:
                 "result": tool_result,
                 "description": node_data.get("data", {}).get("description", ""),
             }
-            # 继承 parallel_group_id（前端并行布局需要）
             if "parallel_group_id" in node_data.get("data", {}):
                 tc_data["parallel_group_id"] = node_data["data"]["parallel_group_id"]
 
@@ -568,24 +586,49 @@ class ReactLoop:
             if prev_id:
                 self._add_edge(prev_id, tc_node.id)
             yield self._emit("node_complete", {"node": tc_node.to_dict(), "graph": self.store.to_dict()})
-            prev_id = tc_node.id
 
-            # Observe 节点
+            # ── Observe 节点：融合所有未废弃同组 ToolCall 的结果 ──
             self.step_index += 1
+
+            # 收集同组所有未废弃的 ToolCall 结果
+            fused_results = [tool_result]  # 新结果
+            pg_id = tc_data.get("parallel_group_id")
+            if pg_id:
+                for n in self.store.nodes:
+                    if (n.data.get("parallel_group_id") == pg_id
+                            and n.id != tc_node.id
+                            and n.status not in ("branch", "discarded", "replaced")
+                            and n.type == "ToolCall"
+                            and n.data.get("result")):
+                        fused_results.append(n.data["result"])
+
             obs_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "Observe"),
                 node_type="Observe",
                 data={
                     "source": tc_node.id,
                     "tool": tool_name,
-                    "result_summary": json.dumps(tool_result, ensure_ascii=False),
+                    "result_summary": json.dumps(fused_results, ensure_ascii=False),
+                    "fused": True,
                 },
                 status="done",
                 step_index=self.step_index,
                 label="观察结果（重试）",
             )
             self.store.add_node(obs_node)
+
+            # 新 ToolCall → 新 Observe
             self._add_edge(tc_node.id, obs_node.id)
+
+            # 同组未废弃的其他 ToolCall 也连到新 Observe
+            if pg_id:
+                for n in self.store.nodes:
+                    if (n.data.get("parallel_group_id") == pg_id
+                            and n.id != tc_node.id
+                            and n.status not in ("branch", "discarded", "replaced")
+                            and n.type == "ToolCall"):
+                        self._add_edge(n.id, obs_node.id)
+
             yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
 
             observations.append(tool_result)
