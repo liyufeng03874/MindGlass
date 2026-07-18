@@ -133,7 +133,7 @@ export function useAgentGraph() {
           }
         }
 
-        if (node.type === 'Answer') {
+        if (node.type === 'Answer' && node.status !== 'replaced') {
           messages.value.push({ role: 'agent', content: node.data.output })
           status.value = '✅ 完成'
           isRunning.value = false
