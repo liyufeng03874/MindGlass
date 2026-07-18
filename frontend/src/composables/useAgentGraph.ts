@@ -256,10 +256,10 @@ export function useAgentGraph() {
   }
 
   /** 从指定 step_index 重试（支持编辑后重跑） */
-  async function retryFrom(stepIndex: number, editedData?: Record<string, any>) {
+  async function retryFrom(stepIndex: number, nodeId: string, editedData?: Record<string, any>) {
     // 检测：如果 stepIndex 对应的是并行组的 ToolCall，走方案 C
     const currentNode = graph.value.nodes.find(
-      n => n.step_index === stepIndex && n.type === 'ToolCall' && n.status !== 'pending'
+      n => n.id === nodeId && n.type === 'ToolCall' && n.status !== 'pending'
     )
     const pgId = currentNode?.data?.parallel_group_id
 
@@ -319,14 +319,14 @@ export function useAgentGraph() {
   }
 
   /** 方案 C：并行重试——只重跑被点击的工具，融合旧结果 */
-  async function retryFromGraph(stepIndex: number, editedData?: Record<string, any>) {
+  async function retryFromGraph(stepIndex: number, nodeId: string, editedData?: Record<string, any>) {
     status.value = '🔄 正在并行重试...'
     connected.value = true
     isRunning.value = true
 
     // 找到被点击的节点
     const currentNode = graph.value.nodes.find(
-      n => n.step_index === stepIndex && n.type === 'ToolCall' && n.status !== 'pending'
+      n => n.id === nodeId && n.type === 'ToolCall' && n.status !== 'pending'
     )
     if (!currentNode) {
       status.value = '❌ 未找到重试节点'

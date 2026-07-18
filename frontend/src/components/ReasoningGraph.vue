@@ -274,7 +274,7 @@ async function handleRetry() {
     }
   }
 
-  emit('retry', editingNode.value.step_index, editedData)
+  emit('retry', editingNode.value.step_index, editingNode.value.id, editedData)
   closeEditor()
 }
 
