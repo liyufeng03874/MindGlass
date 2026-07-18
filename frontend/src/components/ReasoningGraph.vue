@@ -29,6 +29,7 @@
         <div class="node-info">
           <span class="badge" :class="editingNode.type.toLowerCase()">{{ editingNode.type }}</span>
           <span class="step-label">Step {{ editingNode.step_index }}</span>
+          <span v-if="editingNode.duration_ms" class="duration-badge">⏱ {{ formatDuration(editingNode.duration_ms) }}</span>
         </div>
 
         <!-- ToolCall 编辑 -->
@@ -115,6 +116,14 @@ const { fitView } = useVueFlow()
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
 const editingNode = ref<AgentNode | null>(null)
+
+/** 格式化耗时：毫秒 → "X.Ys" 或 "Xms" */
+function formatDuration(ms: number): string {
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(1)}s`
+  }
+  return `${ms}ms`
+}
 
 // 输出预览 computed
 const toolCallResult = computed(() => {
@@ -415,6 +424,16 @@ watch(
 .step-label {
   font-size: 13px;
   color: #888;
+}
+
+.duration-badge {
+  padding: 2px 8px;
+  background: #f0f0f0;
+  color: #666;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Menlo', 'Monaco', monospace;
 }
 
 label {

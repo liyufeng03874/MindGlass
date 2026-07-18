@@ -44,6 +44,8 @@
           ref="chatPanelRef"
           :messages="messages"
           :disabled="isRunning"
+          :statusText="status"
+          :totalElapsed="isRunning ? null : totalElapsed"
           @send="onSend"
           :initialGreeting="initialGreeting"
         />
@@ -58,12 +60,51 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ReasoningGraph from './components/ReasoningGraph.vue'
 import { useAgentGraph } from './composables/useAgentGraph'
 
 const { graph, status, connected, messages, isRunning, sendMessage, retryFrom } = useAgentGraph()
+
+/** 总运行耗时（从 meta.run_started_at 计算） */
+const totalElapsed = ref<string | null>(null)
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}m${s.toFixed(0)}s`
+}
+
+/** 启动/停止总用时定时器 */
+function watchElapsed(active: boolean) {
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
+  if (active && graph.value?.meta?.run_started_at) {
+    const startedAt = graph.value.meta.run_started_at * 1000 // 秒→毫秒
+    elapsedTimer = setInterval(() => {
+      totalElapsed.value = formatElapsed((Date.now() - startedAt) / 1000)
+    }, 100)
+  }
+}
+
+// 监听 isRunning 和 graph.meta.run_started_at 变化
+watch([isRunning, () => graph.value?.meta?.run_started_at], ([running, startedAt]) => {
+  if (running && startedAt) {
+    watchElapsed(true)
+  } else if (!running) {
+    // 运行结束，显示最终值
+    if (graph.value?.meta?.run_started_at) {
+      const startedAt = graph.value.meta.run_started_at * 1000
+      totalElapsed.value = formatElapsed((Date.now() - startedAt) / 1000)
+    }
+    watchElapsed(false)
+  }
+}, { immediate: false })
 
 const showGraph = ref(false)
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
@@ -90,25 +131,20 @@ function onFocusAnswer() {
   }
 }
 
-function loadTestData(demoName: string = 'demo_7') {
+function loadTestData(demoName: string = '1') {
   if (demoLoaded.value) return // 已加载过，必须先清空
 
   loadingDemo.value = true
-  // 调用后端加载 demo 数据（默认 demo_7，可通过参数指定如 demo_8）
-  fetch(`http://localhost:8002/api/load-demo?demo=demo_${demoName}`, { method: 'POST' })
-    .then(res => res.json())
-    .then(() => {
-      // 加载完成后获取图数据
-      return fetch('http://localhost:8002/api/graph')
-    })
+  // 调用后端加载 demo 数据，直接返回 graph
+  fetch(`http://localhost:8002/api/load-demo?demo=${demoName}`, { method: 'POST' })
     .then(res => res.json())
     .then(data => {
-      graph.value = data
+      graph.value = data.graph
       showGraph.value = true
       demoLoaded.value = true
 
       // 提取 Answer 节点的 output 填充到聊天
-      const answerNode = data.nodes?.find((n: any) => n.type === 'Answer' && n.status !== 'replaced')
+      const answerNode = data.graph?.nodes?.find((n: any) => n.type === 'Answer' && n.status !== 'replaced')
       if (answerNode?.data?.output) {
         messages.value.push({
           role: 'user',

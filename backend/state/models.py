@@ -38,6 +38,7 @@ class ReasoningNode:
         step_index: int = 0,
         branch_id: Optional[str] = None,
         label: str = "",
+        duration_ms: Optional[int] = None,
     ):
         self.id = node_id
         self.type = node_type
@@ -46,9 +47,10 @@ class ReasoningNode:
         self.step_index = step_index
         self.branch_id = branch_id
         self.label = label
+        self.duration_ms = duration_ms  # 节点执行用时（毫秒）
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "id": self.id,
             "type": self.type,
             "data": self.data,
@@ -57,6 +59,9 @@ class ReasoningNode:
             "branch_id": self.branch_id,
             "label": self.label,
         }
+        if self.duration_ms is not None:
+            result["duration_ms"] = self.duration_ms
+        return result
 
 
 class ReasoningEdge:
@@ -98,11 +103,15 @@ class ReasoningMeta:
         self.total_steps: int = 0
         self.query = query
         self.run_id = run_id
+        self.run_started_at: Optional[float] = None  # 本次运行开始时间（秒级时间戳）
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "current_step_index": self.current_step_index,
             "total_steps": self.total_steps,
             "query": self.query,
             "run_id": self.run_id,
         }
+        if self.run_started_at is not None:
+            result["run_started_at"] = self.run_started_at
+        return result

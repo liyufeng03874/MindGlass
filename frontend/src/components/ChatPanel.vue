@@ -8,18 +8,18 @@
       </div>
 
       <div
-        v-for="(msg, idx) in messages"
+        v-for="(msg, idx) in displayMessages"
         :key="idx"
         :data-msg-index="idx"
         :class="['message', msg.role]"
       >
         <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
-        <div class="bubble" v-if="msg.role === 'agent'" v-html="md.render(msg.content)" :class="{ highlighted: idx === messages.length - 1 && highlightIndex === messages.length - 1 }"></div>
+        <div class="bubble" v-if="msg.role === 'agent'" v-html="md.render(msg.content)" :class="{ highlighted: idx === displayMessages.length - 1 && highlightIndex === displayMessages.length - 1 }"></div>
         <div class="bubble" v-else>{{ msg.content }}</div>
       </div>
       <div v-if="loading" class="message agent">
         <div class="avatar">🤖</div>
-        <div class="bubble thinking">正在思考...</div>
+        <div class="bubble thinking">{{ statusText || '正在规划...' }}</div>
       </div>
     </div>
     <div class="input-area">
@@ -47,6 +47,8 @@ const props = defineProps<{
   messages: Array<{ role: 'user' | 'agent', content: string }>
   disabled?: boolean
   initialGreeting?: string
+  statusText?: string
+  totalElapsed?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -57,6 +59,20 @@ const inputValue = ref('')
 const highlightIndex = ref<number | null>(null)
 const messagesRef = ref<HTMLElement | null>(null)
 const loading = computed(() => props.disabled)
+
+/** 将总用时追加到最后一条 agent 消息末尾 */
+const displayMessages = computed(() => {
+  if (!props.messages.length || !props.totalElapsed) return props.messages
+  const lastAgent = [...props.messages].reverse().find(m => m.role === 'agent')
+  if (!lastAgent) return props.messages
+  const elapsedTag = `\n\n---\n\n*（本次推理耗时 ${props.totalElapsed}）*`
+  return props.messages.map((m, i) => {
+    if (m === lastAgent && i === props.messages.length - 1) {
+      return { ...m, content: m.content + elapsedTag }
+    }
+    return m
+  })
+})
 
 watch(() => props.messages.length, async () => {
   await nextTick()
@@ -238,6 +254,17 @@ function handleSend() {
 }
 .message.agent .bubble :deep(a:hover) {
   text-decoration: underline;
+}
+
+.elapsed-badge {
+  background: #f5f5f5;
+  color: #888;
+  font-size: 12px;
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
 }
 
 .thinking {

@@ -14,6 +14,7 @@ import uuid
 import json
 from typing import AsyncGenerator, Optional
 from datetime import datetime
+import time
 
 from state.store import ReasoningGraphStore
 from state.models import ReasoningNode, ReasoningEdge
@@ -58,6 +59,10 @@ class ReactLoop:
         """添加边"""
         self.store.add_edge(ReasoningEdge(from_id=from_id, to_id=to_id, edge_type=edge_type))
 
+    def _mark_node_duration(self, node: ReasoningNode, start_time: float) -> None:
+        """记录节点执行耗时（毫秒）"""
+        node.duration_ms = round((time.time() - start_time) * 1000)
+
     async def _safe_tool_call(self, tool_name: str, params: dict) -> tuple[bool, dict]:
         """安全执行工具，返回 (success, result)"""
         try:
@@ -99,6 +104,7 @@ class ReactLoop:
 
             if len(batch) > 1:
                 yield self._emit("status", {"message": f"🔧 并行执行 {len(batch)} 个工具调用..."})
+                batch_start = time.time()
 
                 async def _exec(idx, s):
                     tn = s.get("tool", "search")
@@ -127,6 +133,7 @@ class ReactLoop:
                         step_index=self.step_index,
                         label=f"{tool_name}",
                     )
+                    self._mark_node_duration(tc_node, batch_start)
                     self.store.add_node(tc_node)
                     if parallel_prev_id:
                         self._add_edge(parallel_prev_id, tc_node.id, edge_type="Parallel")
@@ -152,6 +159,7 @@ class ReactLoop:
                     step_index=self.step_index + 1,
                     label="观察结果",
                 )
+                self._mark_node_duration(obs_node, batch_start)
                 self.store.add_node(obs_node)
                 # 所有 ToolCall → Observe
                 for tc in tc_nodes:
@@ -164,14 +172,15 @@ class ReactLoop:
                 tn = batch[0][1].get("tool", "search")
                 tp = batch[0][1].get("params", {})
                 yield self._emit("status", {"message": f"🔧 正在执行: {tn}"})
+                single_start = time.time()
                 ok, res = await self._safe_tool_call(tn, tp)
-                self._emit_toolcall_observe(batch[0][1], ok, res, observations)
+                self._emit_toolcall_observe(batch[0][1], ok, res, observations, start_time=single_start)
                 yield self._emit_last_node()
                 self.step_index += 2
 
             i = j
 
-    def _emit_toolcall_only(self, step: dict, success: bool, tool_result: dict, parallel_group_id: Optional[str] = None, fixed_prev_id: Optional[str] = None) -> None:
+    def _emit_toolcall_only(self, step: dict, success: bool, tool_result: dict, parallel_group_id: Optional[str] = None, fixed_prev_id: Optional[str] = None, start_time: Optional[float] = None) -> None:
         """只生成 ToolCall 节点（并行组中用，Observe 会合并）"""
         tool_name = step.get("tool", "search")
         prev_id = fixed_prev_id if fixed_prev_id is not None else self._prev_node_id()
@@ -191,13 +200,15 @@ class ReactLoop:
             step_index=tc_step,
             label=f"{tool_name}",
         )
+        if start_time is not None:
+            self._mark_node_duration(tc_node, start_time)
         self.store.add_node(tc_node)
         if prev_id:
             edge_type = "Parallel" if parallel_group_id else "Normal"
             self._add_edge(prev_id, tc_node.id, edge_type=edge_type)
         self._last_node = tc_node
 
-    def _emit_toolcall_observe(self, step: dict, success: bool, tool_result: dict, observations: list, parallel_group_id: Optional[str] = None, fixed_prev_id: Optional[str] = None) -> None:
+    def _emit_toolcall_observe(self, step: dict, success: bool, tool_result: dict, observations: list, parallel_group_id: Optional[str] = None, fixed_prev_id: Optional[str] = None, start_time: Optional[float] = None) -> None:
         """生成 ToolCall + Observe 节点（不 yield，供并行后批量 emit）"""
         tool_name = step.get("tool", "search")
         description = step.get("description", "")
@@ -222,6 +233,8 @@ class ReactLoop:
             step_index=tc_step,
             label=f"{tool_name}",
         )
+        if start_time is not None:
+            self._mark_node_duration(tc_node, start_time)
         self.store.add_node(tc_node)
         if prev_id:
             edge_type = "Parallel" if parallel_group_id else "Normal"
@@ -240,6 +253,7 @@ class ReactLoop:
             step_index=obs_step,
             label="观察结果",
         )
+        self._mark_node_duration(obs_node, start_time)
         self.store.add_node(obs_node)
         self._add_edge(tc_node.id, obs_node.id)
         self._last_node = obs_node
@@ -253,6 +267,7 @@ class ReactLoop:
     async def _generate_answer(self, query: str, observations: list, plan_info: str = "") -> AsyncGenerator[str, None]:
         """生成最终回答"""
         yield self._emit("status", {"message": "✍️ 正在生成回答..."})
+        answer_start = time.time()
 
         # 传入完整上下文：query + 规划思路 + observations
         context = f"规划思路：{plan_info}" if plan_info else ""
@@ -279,6 +294,7 @@ class ReactLoop:
             step_index=self.step_index,
             label="最终回答",
         )
+        self._mark_node_duration(ans_node, answer_start)
         self.store.add_node(ans_node)
         if prev_id:
             self._add_edge(prev_id, ans_node.id)
@@ -309,9 +325,11 @@ class ReactLoop:
         self.store.reset()
         self.store.meta.run_id = self.run_id
         self.store.meta.query = query
+        self.store.meta.run_started_at = time.time()
 
         # Step 0: Plan
         yield self._emit("status", {"message": "🤔 正在规划..."})
+        plan_start = time.time()
         plan_result = await plan(query)
         steps = plan_result.get("steps", [])
         plan_info = plan_result.get("thought", "")
@@ -328,6 +346,7 @@ class ReactLoop:
             step_index=self.step_index,
             label=f"规划 ({len(steps)} 步)",
         )
+        self._mark_node_duration(plan_node, plan_start)
         self.store.add_node(plan_node)
         yield self._emit("node_complete", {"node": plan_node.to_dict(), "graph": self.store.to_dict()})
 
@@ -400,6 +419,7 @@ class ReactLoop:
                     break
 
             yield self._emit("status", {"message": f"🔧 重新执行: {effective_tool}"})
+            retry_start = time.time()
             success, tool_result = await self._safe_tool_call(effective_tool, effective_params)
 
             tc_node = ReasoningNode(
@@ -415,6 +435,7 @@ class ReactLoop:
                 step_index=self.step_index,
                 label=f"{effective_tool}（重试）",
             )
+            self._mark_node_duration(tc_node, retry_start)
             self.store.add_node(tc_node)
             if prev_id:
                 self._add_edge(prev_id, tc_node.id)
@@ -436,6 +457,7 @@ class ReactLoop:
                 step_index=self.step_index,
                 label="观察结果",
             )
+            self._mark_node_duration(obs_node, retry_start)
             self.store.add_node(obs_node)
             self._add_edge(prev_id, obs_node.id)
             yield self._emit("node_complete", {"node": obs_node.to_dict(), "graph": self.store.to_dict()})
@@ -559,6 +581,7 @@ class ReactLoop:
             params = node_data.get("data", {}).get("params", {})
 
             yield self._emit("status", {"message": f"🔧 重新执行: {tool_name}"})
+            retry_start = time.time()
             success, tool_result = await self._safe_tool_call(tool_name, params)
 
             # 新 ToolCall 节点（占据原位置）
@@ -579,6 +602,7 @@ class ReactLoop:
                 step_index=self.step_index,
                 label=f"{tool_name}（重试）",
             )
+            self._mark_node_duration(tc_node, retry_start)
             self.store.add_node(tc_node)
             if prev_id:
                 self._add_edge(prev_id, tc_node.id)
@@ -613,6 +637,7 @@ class ReactLoop:
                 step_index=self.step_index,
                 label="观察结果（重试）",
             )
+            self._mark_node_duration(obs_node, retry_start)
             self.store.add_node(obs_node)
 
             # 新 ToolCall → 新 Observe

@@ -163,7 +163,7 @@ def load_demo(demo: str = Query(default="1")):
                 edge_type=edge.get("type", "Normal"),
             ))
 
-        return {"status": "ok", "message": "已加载 demo_6 测试数据", "node_count": len(graph_data.get("nodes", []))}
+        return {"status": "ok", "message": f"已加载 {demo_name} 测试数据", "node_count": len(graph_data.get("nodes", [])), "graph": graph_data}
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON 解析失败：{str(e)}")
 

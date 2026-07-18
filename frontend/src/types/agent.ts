@@ -14,6 +14,7 @@ export interface AgentNode {
   step_index: number
   branch_id: string | null
   label: string
+  duration_ms?: number  // 节点执行耗时（毫秒）
 }
 
 export interface AgentEdge {
@@ -34,6 +35,7 @@ export interface ReasoningMeta {
   total_steps: number
   query: string
   run_id: string
+  run_started_at?: number  // 本次运行开始时间（秒级时间戳）
 }
 
 export interface ReasoningGraph {
