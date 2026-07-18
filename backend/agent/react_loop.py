@@ -523,7 +523,7 @@ class ReactLoop:
             existing = self.store.get_node_by_id(node_data["id"])
             if existing:
                 existing.status = "branch"
-                existing.step_index = 999
+                # step_index 保持不变，和同组节点在同一层
                 existing.data["branch"] = True
                 existing.label = f"{node_data.get('label', node_data['type'])}（废弃）"
                 yield self._emit("node_complete", {"node": existing.to_dict(), "graph": self.store.to_dict()})

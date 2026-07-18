@@ -37,9 +37,6 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
 
     // 找到分叉点
     const firstBranchStep = activeNodes.find(n => n.status === 'branch')?.step_index
-    const newBranchStartStep = firstBranchStep !== undefined
-      ? activeNodes.find(n => n.status !== 'branch' && n.step_index >= firstBranchStep)?.step_index
-      : undefined
 
     // 检测并行组：同 step_index + 同 parallel_group_id 的 ToolCall 节点
     const parallelGroups = new Map<string, AgentNode[]>()
@@ -51,39 +48,42 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       }
     })
 
-    // 记录哪些节点属于并行组
+    // 记录哪些节点属于并行组（排除 branch）
     const parallelNodeIds = new Set<string>()
     parallelGroups.forEach(group => {
-      group.forEach(n => parallelNodeIds.add(n.id))
+      group.filter(n => n.status !== 'branch').forEach(n => parallelNodeIds.add(n.id))
     })
 
     activeNodes.forEach((node) => {
       const colorScheme = NODE_COLORS[node.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: node.type }
       const isPending = node.status === 'pending'
       const isBranch = node.status === 'branch'
-      const isNewBranch = newBranchStartStep !== undefined && node.step_index >= newBranchStartStep && !isBranch
       const isParallel = parallelNodeIds.has(node.id)
 
-      // 分叉布局
-      let xOffset = 0
-      if (isBranch) xOffset = branchOffsetX
-      else if (isNewBranch) xOffset = newBranchOffsetX
+      // 布局：branch 节点在同一层，水平放最右侧
+      let xPosition: number
+      let yPosition = node.step_index * spacingY
 
-      // 并行节点水平排列
-      let xPosition = centerX - 100 + xOffset
-      if (isParallel) {
+      if (isBranch) {
+        // 废弃节点：保持同层 y，x 放右侧
+        xPosition = centerX + 200
+      } else if (isParallel) {
+        // 并行节点：居中排列（branch 已排除）
         const pgId = node.data?.parallel_group_id
-        const group = parallelGroups.get(pgId!)
+        const group = parallelGroups.get(pgId!)?.filter(n => n.status !== 'branch')
         if (group) {
           const idx = group.findIndex(n => n.id === node.id)
-          // 居中：整组偏移
-          xPosition = centerX - 100 + xOffset + (idx - (group.length - 1) / 2) * spacingX
+          xPosition = centerX - 100 + (idx - (group.length - 1) / 2) * spacingX
+        } else {
+          xPosition = centerX - 100
         }
+      } else {
+        xPosition = centerX - 100
       }
 
       const flowNode: Node = {
         id: node.id,
-        position: { x: xPosition, y: node.step_index * spacingY },
+        position: { x: xPosition, y: yPosition },
         data: {
           label: node.label,
           type: node.type,
