@@ -507,54 +507,39 @@ class ReactLoop:
 
     async def retry_from_graph(self, step_index: int, old_nodes: list[dict], new_nodes: list[dict], query: str, plan_info: str) -> AsyncGenerator[str, None]:
         """
-        方案 C：并行重试——前端发旧标记节点+新标记节点，后端根据标记融合。
-        旧节点灰色保留为废弃分支，新节点执行后融合 observations 送 Answer。
-        
-        Args:
-            step_index: 重试的 step_index
-            old_nodes: 保留的旧节点列表（data.original='old'），灰色废弃分支
-            new_nodes: 新节点列表（data.original='new'），需要执行
-            query: 原始用户查询
-            plan_info: 规划思路
+        方案 C：并行重试——前端发被编辑的旧节点+新节点，后端融合。
+        只有被编辑的节点变成废弃分支（推远 step=999），新节点占据原位置。
+        同组其他并行节点不动。
         """
         observations = []
-        prev_id = None
 
-        # 找到 step_index 之前的最后一个非 branch 节点
+        # 旧节点（被编辑的那个）：推远到 step 999，标记为废弃
+        for node_data in old_nodes:
+            node_result = node_data.get("data", {}).get("result")
+            if node_result:
+                observations.append(node_result)
+
+            old_node = ReasoningNode(
+                node_id=node_data["id"],  # 用原 ID
+                node_type=node_data["type"],
+                data={**node_data.get("data", {}), "branch": True},
+                status="branch",
+                step_index=999,  # 推到远位置
+                label=f"{node_data.get('label', node_data['type'])}（废弃）",
+            )
+            self.store.add_node(old_node)
+            yield self._emit("node_complete", {"node": old_node.to_dict(), "graph": self.store.to_dict()})
+
+        # 新节点：占据原 step_index 位置
+        self.step_index = step_index
+
+        # 找到 prev_id
+        prev_id = None
         for n in reversed(self.store.nodes):
             if n.status not in ("discarded", "branch") and n.step_index < step_index:
                 prev_id = n.id
                 break
 
-        self.step_index = step_index
-
-        # 处理旧节点：加为 branch/灰色保留，不执行，但提取其结果作为旧 observation
-        for node_data in old_nodes:
-            node_type = node_data.get("type", "ToolCall")
-            node_result = node_data.get("data", {}).get("result")
-            node_id = node_data.get("id", _make_node_id(self.step_index, node_type))
-
-            # 旧节点作为灰色废弃分支添加到图中
-            old_node = ReasoningNode(
-                node_id=node_id,
-                node_type=node_type,
-                data={**node_data.get("data", {}), "branch": True},
-                status="branch",  # 灰色废弃分支
-                step_index=self.step_index,
-                label=f"{node_data.get('label', node_type)}（废弃）",
-            )
-            self.store.add_node(old_node)
-            if prev_id:
-                self._add_edge(prev_id, old_node.id)
-            prev_id = old_node.id
-
-            # 提取旧结果作为 observation
-            if node_result:
-                observations.append(node_result)
-
-            self.step_index += 1
-
-        # 处理新节点：执行 + 创建 Observe
         for node_data in new_nodes:
             tool_name = node_data.get("data", {}).get("tool", "search")
             params = node_data.get("data", {}).get("params", {})
@@ -562,7 +547,7 @@ class ReactLoop:
             yield self._emit("status", {"message": f"🔧 重新执行: {tool_name}"})
             success, tool_result = await self._safe_tool_call(tool_name, params)
 
-            # 新 ToolCall 节点
+            # 新 ToolCall 节点（占据原位置）
             tc_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "ToolCall"),
                 node_type="ToolCall",
@@ -581,9 +566,9 @@ class ReactLoop:
                 self._add_edge(prev_id, tc_node.id)
             yield self._emit("node_complete", {"node": tc_node.to_dict(), "graph": self.store.to_dict()})
             prev_id = tc_node.id
-            self.step_index += 1
 
             # Observe 节点
+            self.step_index += 1
             obs_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "Observe"),
                 node_type="Observe",

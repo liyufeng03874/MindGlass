@@ -315,26 +315,22 @@ export function useAgentGraph() {
     }
   }
 
-  /** 方案 C：并行重试——发送完整上下文+标记，后端融合 */
+  /** 方案 C：并行重试——被编辑的旧节点废弃推远，新节点占原位 */
   async function retryFromGraph(stepIndex: number, originalNode: any, editedData?: Record<string, any>) {
     status.value = '🔄 正在并行重试...'
     connected.value = true
     isRunning.value = true
 
-    const pgId = originalNode.data?.parallel_group_id
+    // 旧节点：只有被编辑的那个（将废弃并推到远位置）
+    const oldNode = {
+      ...originalNode,
+      data: {
+        ...originalNode.data,
+        original: 'old' as const,
+      },
+    }
 
-    // 获取同一并行组的其他 ToolCall（保留的旧节点）
-    const groupToolCalls = graph.value.nodes.filter(
-      n => n.data?.parallel_group_id === pgId && n.type === 'ToolCall' && n.status !== 'pending' && n.id !== originalNode.id
-    )
-
-    // 旧节点加 original: 'old' 标记
-    const oldNodes = groupToolCalls.map(n => ({
-      ...n,
-      data: { ...n.data, original: 'old' as const },
-    }))
-
-    // 新节点：基于原节点 + 编辑后的数据，加 original: 'new' 标记
+    // 新节点：编辑后的版本（占据原位置）
     const newNode = {
       ...originalNode,
       data: {
@@ -355,7 +351,7 @@ export function useAgentGraph() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         step_index: stepIndex,
-        old_nodes: oldNodes,
+        old_nodes: [oldNode],
         new_nodes: [newNode],
         query,
         plan_info: planInfo,
