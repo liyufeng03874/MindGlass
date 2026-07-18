@@ -48,10 +48,10 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       }
     })
 
-    // 记录哪些节点属于并行组（排除 branch）
+    // 记录哪些节点属于并行组（包含 branch，全部参与居中）
     const parallelNodeIds = new Set<string>()
     parallelGroups.forEach(group => {
-      group.filter(n => n.status !== 'branch').forEach(n => parallelNodeIds.add(n.id))
+      group.forEach(n => parallelNodeIds.add(n.id))
     })
 
     activeNodes.forEach((node) => {
@@ -60,25 +60,23 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       const isBranch = node.status === 'branch'
       const isParallel = parallelNodeIds.has(node.id)
 
-      // 布局：branch 节点在同一层，水平放最右侧
-      let xPosition: number
+      // 布局：并行节点等间距居中，branch 排最右
+      let xPosition = centerX - 100
       let yPosition = node.step_index * spacingY
 
-      if (isBranch) {
-        // 废弃节点：保持同层 y，x 放右侧
-        xPosition = centerX + 200
-      } else if (isParallel) {
-        // 并行节点：居中排列（branch 已排除）
+      if (isParallel) {
         const pgId = node.data?.parallel_group_id
-        const group = parallelGroups.get(pgId!)?.filter(n => n.status !== 'branch')
+        const group = parallelGroups.get(pgId!)
         if (group) {
-          const idx = group.findIndex(n => n.id === node.id)
-          xPosition = centerX - 100 + (idx - (group.length - 1) / 2) * spacingX
-        } else {
-          xPosition = centerX - 100
+          // 排序：branch 节点排最后（最右），其余按原序
+          const sorted = group.slice().sort((a, b) => {
+            if (a.status === 'branch' && b.status !== 'branch') return 1
+            if (a.status !== 'branch' && b.status === 'branch') return -1
+            return 0
+          })
+          const idx = sorted.findIndex(n => n.id === node.id)
+          xPosition = centerX - 100 + (idx - (sorted.length - 1) / 2) * spacingX
         }
-      } else {
-        xPosition = centerX - 100
       }
 
       const flowNode: Node = {

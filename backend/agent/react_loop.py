@@ -546,15 +546,20 @@ class ReactLoop:
             success, tool_result = await self._safe_tool_call(tool_name, params)
 
             # 新 ToolCall 节点（占据原位置）
+            tc_data = {
+                "tool": tool_name,
+                "params": params,
+                "result": tool_result,
+                "description": node_data.get("data", {}).get("description", ""),
+            }
+            # 继承 parallel_group_id（前端并行布局需要）
+            if "parallel_group_id" in node_data.get("data", {}):
+                tc_data["parallel_group_id"] = node_data["data"]["parallel_group_id"]
+
             tc_node = ReasoningNode(
                 node_id=_make_node_id(self.step_index, "ToolCall"),
                 node_type="ToolCall",
-                data={
-                    "tool": tool_name,
-                    "params": params,
-                    "result": tool_result,
-                    "description": node_data.get("data", {}).get("description", ""),
-                },
+                data=tc_data,
                 status="done" if success else "error",
                 step_index=self.step_index,
                 label=f"{tool_name}（重试）",
