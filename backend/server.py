@@ -111,11 +111,11 @@ async def retry_from_graph(request: dict):
 
 @app.post("/api/load-demo")
 def load_demo():
-    """加载 demo_6.txt 作为测试数据"""
+    """加载 demo_7.txt 作为测试数据"""
     import os
-    demo_path = os.path.join(os.path.dirname(__file__), "docs", "demo_6.txt")
+    demo_path = os.path.join(os.path.dirname(__file__), "docs", "demo_7.txt")
     if not os.path.exists(demo_path):
-        raise HTTPException(status_code=404, detail="demo_6.txt 不存在")
+        raise HTTPException(status_code=404, detail="demo_7.txt 不存在")
 
     with open(demo_path, "r", encoding="utf-8") as f:
         content = f.read().strip()
