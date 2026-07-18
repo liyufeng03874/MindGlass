@@ -513,22 +513,20 @@ class ReactLoop:
         """
         observations = []
 
-        # 旧节点（被编辑的那个）：推远到 step 999，标记为废弃
+        # 旧节点（被编辑的那个）：先找到并标记为 branch，推远到 step 999
         for node_data in old_nodes:
             node_result = node_data.get("data", {}).get("result")
             if node_result:
                 observations.append(node_result)
 
-            old_node = ReasoningNode(
-                node_id=node_data["id"],  # 用原 ID
-                node_type=node_data["type"],
-                data={**node_data.get("data", {}), "branch": True},
-                status="branch",
-                step_index=999,  # 推到远位置
-                label=f"{node_data.get('label', node_data['type'])}（废弃）",
-            )
-            self.store.add_node(old_node)
-            yield self._emit("node_complete", {"node": old_node.to_dict(), "graph": self.store.to_dict()})
+            # 在 store 里找到原节点，直接修改它
+            existing = self.store.get_node_by_id(node_data["id"])
+            if existing:
+                existing.status = "branch"
+                existing.step_index = 999
+                existing.data["branch"] = True
+                existing.label = f"{node_data.get('label', node_data['type'])}（废弃）"
+                yield self._emit("node_complete", {"node": existing.to_dict(), "graph": self.store.to_dict()})
 
         # 新节点：占据原 step_index 位置
         self.step_index = step_index
