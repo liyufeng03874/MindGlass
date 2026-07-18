@@ -6,13 +6,20 @@
       <div class="status-bar">
         <span :class="['status-dot', { active: connected }]"></span>
         <span>{{ status || '就绪' }}</span>
-        <button
-          v-if="graph.nodes.length === 0"
-          class="toggle-graph-btn"
-          @click="loadTestData"
-        >
-          📦 加载测试数据
-        </button>
+        <template v-if="graph.nodes.length === 0">
+          <input
+            v-model="demoInput"
+            class="demo-input"
+            placeholder="demo_7"
+            @keydown.enter="loadTestData(demoInput || undefined)"
+          />
+          <button
+            class="toggle-graph-btn"
+            @click="loadTestData(demoInput || undefined)"
+          >
+            📦 加载测试数据
+          </button>
+        </template>
         <button
           v-else
           class="toggle-graph-btn"
@@ -52,6 +59,7 @@ const { graph, status, connected, messages, isRunning, sendMessage, retryFrom } 
 
 const showGraph = ref(false)
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
+const demoInput = ref('')
 const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解复杂问题、调用工具搜索、生成结构化回答。试试问我点什么吧～'
 
   function onSend(query: string) {
@@ -163,6 +171,22 @@ body {
 .status-dot.active {
   background: #52c41a;
   animation: pulse 1.5s infinite;
+}
+
+.demo-input {
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #333;
+  width: 90px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.demo-input:focus {
+  border-color: #52c41a;
 }
 
 .toggle-graph-btn {
