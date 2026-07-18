@@ -109,12 +109,13 @@ async def retry_from_graph(request: dict):
 
 
 @app.post("/api/load-demo")
-def load_demo():
-    """加载 demo_7.txt 作为测试数据"""
+def load_demo(demo: str = Query(default="demo_7")):
+    """加载 demo 静态数据，默认 demo_7，可通过 ?demo=demo_8 指定"""
     import os
-    demo_path = os.path.join(os.path.dirname(__file__), "docs", "demo_7.txt")
+    demo_name = demo if demo.endswith(".txt") else f"{demo}.txt"
+    demo_path = os.path.join(os.path.dirname(__file__), "docs", demo_name)
     if not os.path.exists(demo_path):
-        raise HTTPException(status_code=404, detail="demo_7.txt 不存在")
+        raise HTTPException(status_code=404, detail=f"{demo_name} 不存在")
 
     with open(demo_path, "r", encoding="utf-8") as f:
         content = f.read().strip()

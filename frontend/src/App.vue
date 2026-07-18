@@ -72,9 +72,9 @@ function onFocusAnswer() {
   }
 }
 
-function loadTestData() {
-  // 调用后端加载 demo_6 数据
-  fetch('http://localhost:8002/api/load-demo', { method: 'POST' })
+function loadTestData(demoName: string = 'demo_7') {
+  // 调用后端加载 demo 数据（默认 demo_7，可通过参数指定如 demo_8）
+  fetch(`http://localhost:8002/api/load-demo?demo=${demoName}`, { method: 'POST' })
     .then(res => res.json())
     .then(() => {
       // 加载完成后获取图数据
@@ -98,7 +98,7 @@ function loadTestData() {
         })
       }
 
-      status.value = '📦 已加载 demo_6 测试数据'
+      status.value = `📦 已加载 ${demoName} 测试数据`
     })
     .catch(() => {
       status.value = '❌ 加载测试数据失败'
