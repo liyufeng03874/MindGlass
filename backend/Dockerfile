@@ -7,11 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 
 WORKDIR /app
 
-# 先拷依赖，利用缓存（加阿里云 pip 镜像）
+# 依赖（加阿里云 pip 镜像）
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
-# 再拷代码
+# 代码
 COPY ./ ./
 
 EXPOSE 8001
