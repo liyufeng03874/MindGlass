@@ -154,9 +154,40 @@ const toolCallResult = computed(() => {
   return parts.join('\n\n---\n\n')
 })
 
+/** v2: 渲染结构化 Observe 评估输出 */
+function buildStructuredObserve(obs: any): string {
+  const parts: string[] = []
+  if (obs.round) parts.push(`**第 ${obs.round} 轮评估**`)
+  if (obs.summary) parts.push(obs.summary)
+  const findings = obs.key_findings || []
+  if (findings.length) {
+    parts.push('**要点**')
+    findings.forEach((f: string, i: number) => parts.push(`${i + 1}. ${f}`))
+    parts.push('')
+  }
+  const conflicts = obs.conflicts || []
+  if (conflicts.length) {
+    parts.push('**矛盾处理**')
+    conflicts.forEach((c: any) => {
+      parts.push(`- **${c.topic || '矛盾'}**（置信度: ${c.confidence || '?'}）`)
+      if (c.resolution) parts.push(`  处理：${c.resolution}`)
+    })
+    parts.push('')
+  }
+  if (obs.duplicates_removed) parts.push(`*去重 ${obs.duplicates_removed} 条重复结果*`)
+  if (obs.new_info_vs_previous && obs.round > 1) parts.push(`*新增信息：${obs.new_info_vs_previous}*`)
+  return parts.join('\n')
+}
+
 const observeResult = computed(() => {
-  if (!editingNode.value?.data?.result_summary) return ''
-  const summary = editingNode.value.data.result_summary
+  const data = editingNode.value?.data
+  if (!data) return ''
+  // v2: 结构化 observe_output 优先
+  if (data.observe_output) {
+    return buildStructuredObserve(data.observe_output)
+  }
+  if (!data.result_summary) return ''
+  const summary = data.result_summary
 
   // 先试标准 JSON（新数据）
   try {

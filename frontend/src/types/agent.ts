@@ -2,9 +2,9 @@
  * MindGlass — Agent 推理图数据类型
  */
 
-export type NodeType = 'Plan' | 'ToolCall' | 'Observe' | 'Answer'
-export type NodeStatus = 'done' | 'current' | 'pending' | 'error' | 'discarded' | 'branch'
-export type EdgeType = 'Normal' | 'Retry' | 'Fallback' | 'Branch'
+export type NodeType = 'Plan' | 'ToolCall' | 'Observe' | 'Answer' | 'Decision'
+export type NodeStatus = 'done' | 'current' | 'pending' | 'error' | 'discarded' | 'branch' | 'replaced'
+export type EdgeType = 'Normal' | 'Retry' | 'Fallback' | 'Branch' | 'Parallel' | 'Pending'
 
 export interface AgentNode {
   id: string
@@ -36,6 +36,7 @@ export interface ReasoningMeta {
   query: string
   run_id: string
   run_started_at?: number  // 本次运行开始时间（秒级时间戳）
+  plan_count?: number      // Plan 轮次（v2 决策循环）
 }
 
 export interface ReasoningGraph {

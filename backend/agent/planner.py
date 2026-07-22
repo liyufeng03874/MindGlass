@@ -1,7 +1,17 @@
-"""MindGlass Agent — 任务规划"""
+"""MindGlass Agent — Plan 决策中枢
 
+Plan 节点的两种模式：
+1. 首次规划（plan_count=1）：拆解用户 query 为工具步骤
+2. 决策判断（plan_count>=2）：根据 Observe 的结构化输出判断信息充足性，
+   决定下一步是补搜（need_more）还是进入回答（sufficient / terminate）
+
+设计文档：docs/observe-plan-design.md
+"""
+
+import json
 from agent.llm import generate
 
+# ── 首次规划 Prompt ──
 PLANNING_SYSTEM_PROMPT = """你是一个任务规划专家。给定用户的查询，你需要将其拆解为一系列可执行的步骤。
 每一步应该是一个明确的动作，并且能够被以下工具之一执行：
 - search: 网络搜索（适用于实时信息、新闻、最新动态等）
@@ -27,29 +37,149 @@ PLANNING_SYSTEM_PROMPT = """你是一个任务规划专家。给定用户的查�
    - 如果不确定，可以两个工具都用，互相补充
 """
 
+# ── 决策判断 Prompt ──
+DECISION_SYSTEM_PROMPT = """你是一个信息充足性评估专家。你的任务是根据已收集的结构化评估报告，判断当前信息是否足以回答用户的原始问题。
 
-async def plan(query: str) -> dict:
+你必须严格按以下 JSON 格式返回，不要有其他文字：
+{
+  "decision": "sufficient | need_more | terminate",
+  "reasoning": "为什么做这个判断（1-2句话）",
+  "if_need_more": {
+    "missing_aspects": ["还缺什么方面"],
+    "suggested_queries": ["补搜query1", "补搜query2"]
+  },
+  "if_terminate": {
+    "reason": "终止原因",
+    "partial_answer_note": "以下回答基于有限信息，XX方面可能不完整"
+  },
+  "plan_count": 2
+}
+
+判断规则：
+1. **sufficient**（信息充足）：当前收集的 key_findings 已经能完整回答用户问题的每个方面，没有明显缺口
+2. **need_more**（需要补搜）：用户问题的某些方面还没有被覆盖，需要追加搜索。在 suggested_queries 中给出补搜的 query（1-2个），在 missing_aspects 中说明缺什么
+3. **terminate**（强制终止）：仅在 plan_count = 3 且信息仍不足时使用。reason 写"已达最大检索轮次"，partial_answer_note 诚实说明哪些方面信息不完整
+
+注意：
+- 不要为了补搜而补搜。如果信息已经足够回答问题，直接 sufficient
+- 补搜的 query 不要和已经搜过的语义重复
+- terminate 时 partial_answer_note 要具体说明哪个方面不完整，不要泛泛而谈
+- 你只做决策，不要自己去搜索或生成回答
+"""
+
+
+async def plan(query: str, observe_outputs: list[dict] = None, plan_count: int = 1) -> dict:
     """
-    接收用户 query，调用 LLM 返回拆解的步骤列表
-    返回: {"thought": "...", "steps": [{"tool": "...", "description": "...", "params": {...}}]}
+    Plan 节点：首次规划或决策判断。
+
+    参数：
+        query: 用户原始问题
+        observe_outputs: 之前轮次的 Observe 结构化输出数组
+        plan_count: 当前是第几次 Plan（1=首次规划，>=2=决策判断）
+
+    返回：
+        plan_count=1 时: {"thought": "...", "steps": [...], "decision": "need_more", "plan_count": 1}
+        plan_count>=2 时: {"decision": "sufficient|need_more|terminate", "reasoning": "...", ...}
     """
+    observe_outputs = observe_outputs or []
+
+    if plan_count == 1:
+        # ── 首次规划：拆解步骤 ──
+        return await _initial_plan(query)
+
+    # ── 决策判断：根据 observe_outputs 判断充足性 ──
+    return await _decide(query, observe_outputs, plan_count)
+
+
+async def _initial_plan(query: str) -> dict:
+    """首次规划：拆解用户 query 为工具步骤"""
     prompt = f"用户查询: {query}\n\n请拆解为可执行步骤："
     result = generate(prompt, system_prompt=PLANNING_SYSTEM_PROMPT)
 
-    import json
-    # 尝试解析 JSON（LLM 可能返回 markdown 代码块包裹的 JSON）
     try:
-        # 清理 markdown 代码块
         cleaned = result.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         parsed = json.loads(cleaned)
+        # 首次规划固定为 need_more（需要执行工具）
+        parsed["decision"] = "need_more"
+        parsed["plan_count"] = 1
         return parsed
     except Exception:
-        # 如果解析失败，返回一个默认的 search 步骤
         return {
             "thought": "无法解析规划结果，使用默认搜索策略",
             "steps": [
                 {"tool": "search", "description": "搜索相关信息", "params": {"query": query}}
             ],
+            "decision": "need_more",
+            "plan_count": 1,
+        }
+
+
+async def _decide(query: str, observe_outputs: list[dict], plan_count: int) -> dict:
+    """决策判断：根据 Observe 输出判断信息充足性"""
+    parts = [f"用户原始问题：{query}\n"]
+    parts.append(f"当前是第 {plan_count} 轮规划（最多 3 轮）。\n")
+    parts.append("=== 各轮检索评估报告 ===")
+
+    for obs in observe_outputs:
+        round_num = obs.get("round", "?")
+        parts.append(f"\n--- 第 {round_num} 轮 ---")
+        parts.append(f"摘要：{obs.get('summary', '')}")
+        findings = obs.get("key_findings", [])
+        if findings:
+            parts.append(f"要点：")
+            for f in findings:
+                parts.append(f"  - {f}")
+        conflicts = obs.get("conflicts", [])
+        if conflicts:
+            parts.append(f"矛盾：")
+            for c in conflicts:
+                parts.append(f"  - {c.get('topic', '')}: {c.get('resolution', '')} (置信度: {c.get('confidence', '?')})")
+        new_info = obs.get("new_info_vs_previous", "")
+        if new_info:
+            parts.append(f"新增信息：{new_info}")
+
+    # 如果是第 3 轮且信息不足，提示 LLM 必须终止
+    if plan_count >= 3:
+        parts.append("\n⚠️ 这是第 3 轮（最后一轮）。如果信息仍然不足，你必须选择 terminate，在 partial_answer_note 中诚实说明哪些方面信息不完整。")
+
+    parts.append("\n请判断信息是否足以回答用户问题，按 JSON 格式输出决策。")
+
+    prompt = "\n".join(parts)
+    result = generate(prompt, system_prompt=DECISION_SYSTEM_PROMPT)
+
+    try:
+        cleaned = result.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        parsed = json.loads(cleaned)
+        parsed["plan_count"] = plan_count
+
+        # 第 3 轮强制：如果 LLM 仍然返回 need_more，覆盖为 terminate
+        if plan_count >= 3 and parsed.get("decision") == "need_more":
+            parsed["decision"] = "terminate"
+            parsed["reasoning"] = "已达最大检索轮次（3轮），强制终止"
+            parsed["if_terminate"] = {
+                "reason": "已达最大检索轮次",
+                "partial_answer_note": parsed.get("if_need_more", {}).get("missing_aspects", ["部分信息"])[0] + "方面信息可能不完整",
+            }
+
+        return parsed
+    except Exception:
+        # 解析失败：如果信息看起来够了就 sufficient，否则 terminate
+        if plan_count >= 3:
+            return {
+                "decision": "terminate",
+                "reasoning": "决策解析失败，已达最大轮次，强制终止",
+                "if_terminate": {
+                    "reason": "决策解析失败",
+                    "partial_answer_note": "回答生成过程中出现异常，部分信息可能不完整",
+                },
+                "plan_count": plan_count,
+            }
+        return {
+            "decision": "sufficient",
+            "reasoning": "决策解析失败，基于已有信息生成回答",
+            "plan_count": plan_count,
         }

@@ -8,6 +8,7 @@ const NODE_COLORS: Record<string, { bg: string; border: string; label: string }>
   ToolCall:  { bg: '#f6ffed', border: '#52c41a', label: '🔧 执行' },
   Observe:   { bg: '#fff7e6', border: '#fa8c16', label: '📡 观察' },
   Answer:    { bg: '#f9f0ff', border: '#722ed1', label: '💬 回答' },
+  Decision:  { bg: '#fffbe6', border: '#faad14', label: '⏳ 待决策' },
 }
 
 // 边类型 → 样式映射
@@ -108,6 +109,9 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
         }
       }
 
+      const isDegraded = node.type === 'Answer' && node.data?.degraded === true
+      const borderColor = isDegraded ? '#fa8c16' : (isDeprecated ? '#d9d9d9' : colorScheme.border)
+
       const flowNode: Node = {
         id: node.id,
         position: { x: xPosition, y: yPosition },
@@ -120,15 +124,16 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           isBranch,
           isReplaced,
           isParallel,
+          isDegraded,
         },
         style: {
           background: isPending ? '#fafafa' : isDeprecated ? '#f5f5f5' : colorScheme.bg,
-          border: isPending ? `2px dashed ${colorScheme.border}` : isParallel ? `3px solid ${colorScheme.border}` : `2px solid ${isDeprecated ? '#d9d9d9' : colorScheme.border}`,
+          border: isPending ? `2px dashed ${colorScheme.border}` : isParallel ? `3px solid ${borderColor}` : `2px solid ${borderColor}`,
           borderRadius: '8px',
           padding: '12px',
           minWidth: '200px',
           opacity: isDeprecated ? 0.5 : isPending ? 0.6 : 1,
-          boxShadow: isPending ? 'none' : '0 2px 8px rgba(0,0,0,0.08)',
+          boxShadow: isPending ? 'none' : isDegraded ? '0 0 8px rgba(250,140,22,0.4)' : '0 2px 8px rgba(0,0,0,0.08)',
         },
       }
 
