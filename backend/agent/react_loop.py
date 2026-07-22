@@ -35,6 +35,18 @@ def _make_node_id(step_index: int, node_type: str) -> str:
     return f"{node_type.lower()}_{step_index}_{uuid.uuid4().hex[:6]}"
 
 
+# 工具名 → 中文节点标签（前端图上显示）
+TOOL_LABELS = {
+    "search": "工具（网络搜索）",
+    "rag_retrieve": "工具（RAG 检索）",
+}
+
+
+def _tool_label(tool_name: str) -> str:
+    """将工具名映射为中文节点标签，未知工具兜底"""
+    return TOOL_LABELS.get(tool_name, f"工具（{tool_name}）")
+
+
 class ReactLoop:
     """决策循环（v2）：Plan-Observe 回环"""
 
@@ -93,8 +105,9 @@ class ReactLoop:
         reasoning = plan_result.get("reasoning", plan_result.get("thought", ""))
 
         # 标签根据决策类型变化
+        # 首次规划不再显示步数：v2 回环中后续可能补搜，步数无法预料
         if plan_count == 1:
-            label = f"规划 ({len(steps)} 步)"
+            label = "规划"
         elif decision == "sufficient":
             label = f"决策：信息充足"
         elif decision == "need_more":
@@ -150,7 +163,7 @@ class ReactLoop:
             },
             status="done" if success else "error",
             step_index=self.step_index,
-            label=f"{tool_name}",
+            label=_tool_label(tool_name),
         )
         if start_time is not None:
             self._mark_node_duration(node, start_time)
@@ -464,7 +477,7 @@ class ReactLoop:
                 {"tool": effective_tool, "params": effective_params, "description": effective_description},
                 success, tool_result, start_time=retry_start,
             )
-            tc_node.label = f"{effective_tool}（重试）"
+            tc_node.label = f"{_tool_label(effective_tool)}（重试）"
             self.store.add_node(tc_node)
             prev_id = self._find_prev_before(step_index)
             if prev_id:
@@ -644,7 +657,7 @@ class ReactLoop:
                 data=tc_data,
                 status="done" if success else "error",
                 step_index=self.step_index,
-                label=f"{tool_name}（重试）",
+                label=f"{_tool_label(tool_name)}（重试）",
             )
             self._mark_node_duration(tc_node, retry_start)
             self.store.add_node(tc_node)

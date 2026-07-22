@@ -55,18 +55,46 @@
           <p v-else class="readonly-hint">暂无输出结果</p>
         </template>
 
-        <!-- Plan 编辑 -->
+        <!-- Plan 只读展示，不提供干预：要改规划不如重新输一个新 query -->
         <template v-else-if="editingNode.type === 'Plan'">
-          <label>规划思路</label>
-          <textarea v-model="editForm.output" class="textarea-field" rows="4" />
+          <!-- 决策节点（Plan 2+）：展示决策 + 理由 -->
+          <template v-if="isDecisionNode">
+            <div class="decision-banner" :class="`decision-${planDecision}`">
+              {{ DECISION_LABELS[planDecision] || planDecision }}
+            </div>
+            <label>决策理由</label>
+            <div class="output-content">{{ planReasoning }}</div>
 
-          <label>步骤列表（JSON）</label>
-          <textarea
-            v-model="editForm.stepsJson"
-            class="textarea-field"
-            rows="8"
-            placeholder='[{"tool": "...", "params": {...}}]'
-          />
+            <template v-if="planDecision === 'need_more'">
+              <label>缺失方面</label>
+              <ul class="info-list">
+                <li v-for="(a, i) in planMissingAspects" :key="i">{{ a }}</li>
+              </ul>
+              <label>补搜计划</label>
+              <ul class="info-list">
+                <li v-for="(q, i) in planSuggestedQueries" :key="i">{{ q }}</li>
+              </ul>
+            </template>
+
+            <template v-else-if="planDecision === 'terminate'">
+              <label>终止说明</label>
+              <div class="output-content terminate-note">{{ planTerminateNote }}</div>
+            </template>
+          </template>
+
+          <!-- 初始规划（Plan 1）：展示思路 + 整洁步骤列表 -->
+          <template v-else>
+            <label>规划思路</label>
+            <div class="output-content">{{ planReasoning }}</div>
+            <label>步骤列表</label>
+            <ol class="step-list">
+              <li v-for="(s, i) in planSteps" :key="i">
+                <span class="step-tool">{{ toolLabel(s.tool) }}</span>
+                <span class="step-query">{{ s.params?.query || s.description || '' }}</span>
+              </li>
+            </ol>
+            <p v-if="!planSteps.length" class="readonly-hint">暂无步骤</p>
+          </template>
         </template>
 
         <!-- Observe 只展示 -->
@@ -80,7 +108,7 @@
 
       </div>
 
-      <div v-if="editingNode && editingNode.type !== 'Observe'" class="panel-footer">
+      <div v-if="editingNode && !['Observe', 'Plan'].includes(editingNode.type)" class="panel-footer">
         <button class="retry-btn" @click="handleRetry" :disabled="isRunning">
           {{ isRunning ? '执行中...' : '🔄 截断并重试' }}
         </button>
@@ -258,6 +286,32 @@ function buildObserveOutput(parsed: any): string {
 
   return parts.join('\n\n---\n\n')
 }
+
+// ── Plan 面板只读展示 ──
+const DECISION_LABELS: Record<string, string> = {
+  sufficient: '✅ 决策：信息充足',
+  need_more: '🔍 决策：需要补搜',
+  terminate: '⚠️ 决策：强制终止',
+}
+
+/** 工具中文名（与后端 TOOL_LABELS 保持一致） */
+function toolLabel(tool: string): string {
+  const map: Record<string, string> = { search: '网络搜索', rag_retrieve: 'RAG 检索' }
+  return map[tool] || tool
+}
+
+/** 是否为决策节点（Plan 2+）；Plan 1 是初始规划 */
+const isDecisionNode = computed(() => (editingNode.value?.data?.plan_count ?? 1) >= 2)
+const planDecision = computed(() => editingNode.value?.data?.decision || '')
+const planReasoning = computed(() => editingNode.value?.data?.reasoning || editingNode.value?.data?.output || '')
+const planMissingAspects = computed(() => editingNode.value?.data?.if_need_more?.missing_aspects || [])
+const planSuggestedQueries = computed(() => editingNode.value?.data?.if_need_more?.suggested_queries || [])
+const planTerminateNote = computed(() =>
+  editingNode.value?.data?.if_terminate?.partial_answer_note ||
+  editingNode.value?.data?.if_terminate?.reason || ''
+)
+const planSteps = computed(() => editingNode.value?.data?.steps || [])
+
 const editForm = ref<Record<string, any>>({})
 
 function onNodeClick({ node }: { node: { id: string } }) {
@@ -499,6 +553,66 @@ label {
   color: #999;
   font-style: italic;
   margin-top: 8px;
+}
+
+/* ── Plan 面板：决策展示 ── */
+.decision-banner {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.decision-sufficient {
+  background: #f6ffed;
+  color: #389e0d;
+  border: 1px solid #b7eb8f;
+}
+.decision-need_more {
+  background: #fff7e6;
+  color: #d46b08;
+  border: 1px solid #ffd591;
+}
+.decision-terminate {
+  background: #fff2f0;
+  color: #cf1322;
+  border: 1px solid #ffccc7;
+}
+
+.info-list {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #444;
+}
+
+.step-list {
+  margin: 4px 0 8px;
+  padding-left: 22px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.step-list li {
+  margin-bottom: 6px;
+}
+.step-tool {
+  display: inline-block;
+  background: #e8f4fd;
+  color: #1677ff;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 8px;
+}
+.step-query {
+  color: #444;
+}
+
+.terminate-note {
+  border-left: 3px solid #fa8c16;
+  background: #fffbe6;
 }
 
 /* 输出预览区域 */

@@ -176,9 +176,22 @@ export function useAgentGraph() {
     graph.value.edges = [...graph.value.edges]
   }
 
-  /** Plan 之后 → 待决策（不确定下一步是 ToolCall 还是 Answer） */
+  /** Plan 之后 → 根据 decision 精确预测下一节点（decision 已在 Plan.data 中） */
   function pushPendingDecision(prevNode: AgentNode) {
-    pushPending(prevNode, 'Decision', '⏳ 待决策')
+    const decision = prevNode.data?.decision
+    if (decision === 'sufficient') {
+      // 信息充足 → 下一节点是最终回答
+      pushPending(prevNode, 'Answer', '最终回答')
+    } else if (decision === 'terminate') {
+      // 强制终止 → 下一节点是降级回答（信息可能不完整）
+      pushPending(prevNode, 'Answer', '最终回答（可能不完整）')
+    } else if (decision === 'need_more') {
+      // 需要补搜 → 下一节点是工具执行
+      pushPending(prevNode, 'ToolCall', '执行工具')
+    } else {
+      // 兜底：未知 decision 才显示"待决策"
+      pushPending(prevNode, 'Decision', '⏳ 待决策')
+    }
   }
 
   /** ToolCall 之后 → Observe（固定） */
