@@ -94,6 +94,8 @@ function watchElapsed(active: boolean) {
 
 // 监听 isRunning 和 graph.meta.run_started_at 变化
 watch([isRunning, () => graph.value?.meta?.run_started_at], ([running, startedAt]) => {
+  // demo 加载时已经手动算过耗时了，watch 不要覆盖
+  if (demoElapsedLocked.value) return
   if (running && startedAt) {
     watchElapsed(true)
   } else if (!running) {
@@ -111,6 +113,8 @@ const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
 const demoInput = ref('')
 const demoLoaded = ref(false)
 const loadingDemo = ref(false)
+/** demo 加载时手动算过耗时，watch 不要覆盖 */
+const demoElapsedLocked = ref(false)
 const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解复杂问题、调用工具搜索、生成结构化回答。试试问我点什么吧～'
 
   function onSend(query: string) {
@@ -144,7 +148,9 @@ function loadTestData(demoName: string = '1') {
       demoLoaded.value = true
 
       // 提取 Answer 节点的 output 填充到聊天
-      const answerNode = data.graph?.nodes?.find((n: any) => n.type === 'Answer' && n.status !== 'replaced')
+      // 优先找 status === 'done' 的最终 Answer，避免选到废弃分支（status === 'branch'）
+      const answerNode = data.graph?.nodes?.find((n: any) => n.type === 'Answer' && n.status === 'done')
+        || data.graph?.nodes?.find((n: any) => n.type === 'Answer' && n.status !== 'replaced')
       if (answerNode?.data?.output) {
         messages.value.push({
           role: 'user',
@@ -155,6 +161,21 @@ function loadTestData(demoName: string = '1') {
           content: answerNode.data.output,
         })
       }
+
+      // 计算总耗时：用各节点 duration_ms 之和（不是用 run_started_at 算实时）
+      const nodes = data.graph?.nodes || []
+      const totalMs = nodes.reduce((sum: number, n: any) => sum + (n.duration_ms || 0), 0)
+      const totalSec = totalMs / 1000
+      if (totalSec > 0) {
+        if (totalSec < 60) {
+          totalElapsed.value = `${totalSec.toFixed(1)}s`
+        } else {
+          const m = Math.floor(totalSec / 60)
+          const s = totalSec % 60
+          totalElapsed.value = `${m}m${s.toFixed(0)}s`
+        }
+      }
+      demoElapsedLocked.value = true
 
       status.value = `📦 已加载 ${demoName} 测试数据`
     })
@@ -171,6 +192,8 @@ function clearDemo() {
   messages.value = []
   showGraph.value = false
   demoLoaded.value = false
+  demoElapsedLocked.value = false
+  totalElapsed.value = null
   status.value = '就绪'
 }
 </script>
