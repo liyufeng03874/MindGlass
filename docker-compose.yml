@@ -1,0 +1,37 @@
+# ---------- MindGlass docker-compose.yml ----------
+# 前端端口 8011 / 后端端口 8001
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mindglass-backend
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - projects_default
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: mindglass-frontend
+    ports:
+      - "8011:80"
+    depends_on:
+      - backend
+    networks:
+      - projects_default
+    restart: unless-stopped
+
+networks:
+  projects_default:
+    external: true
