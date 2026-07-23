@@ -215,7 +215,7 @@ export function useAgentGraph() {
       }
     }
 
-    pushPending(prevNode, 'Observe', '观察结果')
+    pushPending(prevNode, 'Observe', '评估中...')
 
     if (pgId) {
       const pendingObserve = graph.value.nodes.find(

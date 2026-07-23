@@ -100,10 +100,10 @@
         <!-- Observe 只展示 -->
         <template v-else-if="editingNode.type === 'Observe'">
           <div v-if="observeResult" class="output-preview observe-only">
-            <label>👁️ 观察结果</label>
+            <label>👁️ 评估结果</label>
             <div class="answer-content" v-html="md.render(observeResult)"></div>
           </div>
-          <p v-else class="readonly-hint">暂无观察结果</p>
+          <p v-else class="readonly-hint">暂无评估结果</p>
         </template>
 
       </div>
@@ -112,6 +112,20 @@
         <button class="retry-btn" @click="handleRetry" :disabled="isRunning">
           {{ isRunning ? '执行中...' : '🔄 截断并重试' }}
         </button>
+      </div>
+    </div>
+
+    <!-- 废弃回答弹窗：被截断重试前的旧版回答，仅供对比参考 -->
+    <div v-if="deprecatedAnswer" class="deprecated-overlay" @click.self="deprecatedAnswer = null">
+      <div class="deprecated-modal">
+        <div class="panel-header">
+          <h3>🗑️ {{ deprecatedAnswer.label || '废弃回答' }}</h3>
+          <button class="close-btn" @click="deprecatedAnswer = null">✕</button>
+        </div>
+        <div class="deprecated-body">
+          <p class="deprecated-hint">⚠️ 这是被截断重试之前的旧版回答，已被废弃，仅供参考对比。</p>
+          <div class="answer-content" v-html="md.render(deprecatedAnswer.data?.output || '（无内容）')"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -144,6 +158,8 @@ const { fitView } = useVueFlow()
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
 const editingNode = ref<AgentNode | null>(null)
+/** 废弃回答弹窗（replaced/branch 状态的 Answer） */
+const deprecatedAnswer = ref<AgentNode | null>(null)
 
 /** 格式化耗时：毫秒 → "X.Ys" 或 "Xms" */
 function formatDuration(ms: number): string {
@@ -318,9 +334,13 @@ function onNodeClick({ node }: { node: { id: string } }) {
   const target = props.graph?.nodes.find(n => n.id === node.id)
   if (!target) return
 
-  // Answer 节点直接触发聚焦，不弹面板
+  // Answer 节点：废弃回答用弹窗展示旧内容；实际最终回答聚焦聊天区
   if (target.type === 'Answer') {
-    emit('focus-answer')
+    if (target.status === 'replaced' || target.status === 'branch') {
+      deprecatedAnswer.value = target
+    } else {
+      emit('focus-answer')
+    }
     return
   }
 
@@ -437,6 +457,60 @@ watch(
 
 .panel-open {
   right: 0;
+}
+
+/* --- 废弃回答弹窗 --- */
+.deprecated-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.deprecated-modal {
+  width: min(720px, 92%);
+  max-height: 86%;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 4px solid #bfbfbf;
+}
+
+.deprecated-modal .panel-header {
+  background: #fafafa;
+  border-bottom: 1px solid #eee;
+  padding: 14px 18px;
+}
+
+.deprecated-modal .panel-header h3 {
+  font-size: 15px;
+  color: #8c8c8c;
+}
+
+.deprecated-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px;
+}
+
+.deprecated-hint {
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  color: #ad8b00;
+  font-size: 13px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.deprecated-body .answer-content {
+  color: #595959;
 }
 
 .panel-header {
