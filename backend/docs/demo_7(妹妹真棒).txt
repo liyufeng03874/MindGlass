@@ -79,7 +79,7 @@
             "status": "done",
             "step_index": 1,
             "branch_id": null,
-            "label": "search",
+            "label": "工具（网络搜索）",
             "duration_ms": 6374
         },
         {
@@ -217,7 +217,7 @@
             "status": "done",
             "step_index": 4,
             "branch_id": null,
-            "label": "search",
+            "label": "工具（网络搜索）",
             "duration_ms": 3651
         },
         {
@@ -272,7 +272,7 @@
             "status": "done",
             "step_index": 4,
             "branch_id": null,
-            "label": "search",
+            "label": "工具（网络搜索）",
             "duration_ms": 3651
         },
         {

@@ -87,7 +87,7 @@
             "status": "done",
             "step_index": 1,
             "branch_id": null,
-            "label": "search"
+            "label": "工具（网络搜索）"
         },
         {
             "id": "toolcall_1_62fb26",
@@ -141,7 +141,7 @@
             "status": "done",
             "step_index": 1,
             "branch_id": null,
-            "label": "search"
+            "label": "工具（网络搜索）"
         },
         {
             "id": "toolcall_1_ff40d7",
@@ -195,7 +195,7 @@
             "status": "done",
             "step_index": 1,
             "branch_id": null,
-            "label": "search"
+            "label": "工具（网络搜索）"
         },
         {
             "id": "observe_1_98576f",
@@ -212,7 +212,7 @@
             "status": "done",
             "step_index": 2,
             "branch_id": null,
-            "label": "观察结果"
+            "label": "评估（第1轮）"
         },
         {
             "id": "answer_3_b1857f",

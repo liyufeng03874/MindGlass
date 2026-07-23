@@ -78,7 +78,7 @@
             "status": "done",
             "step_index": 1,
             "branch_id": null,
-            "label": "search"
+            "label": "工具（网络搜索）"
         },
         {
             "id": "observe_2_04db8e",
@@ -213,7 +213,7 @@
             "status": "done",
             "step_index": 4,
             "branch_id": null,
-            "label": "search"
+            "label": "工具（网络搜索）"
         },
         {
             "id": "toolcall_4_ac2967",
@@ -268,7 +268,7 @@
             "status": "branch",
             "step_index": 4,
             "branch_id": null,
-            "label": "search（废弃）"
+            "label": "工具（网络搜索）（废弃）"
         },
         {
             "id": "observe_5_e5ad86",

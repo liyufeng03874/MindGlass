@@ -74,7 +74,7 @@
             "status": "branch",
             "step_index": 1,
             "branch_id": null,
-            "label": "rag_retrieve",
+            "label": "工具（RAG 检索）",
             "duration_ms": 68367
         },
         {
@@ -88,7 +88,7 @@
             "status": "branch",
             "step_index": 2,
             "branch_id": null,
-            "label": "观察结果",
+            "label": "评估（第1轮）",
             "duration_ms": 68367
         },
         {
@@ -156,7 +156,7 @@
             "status": "done",
             "step_index": 1,
             "branch_id": null,
-            "label": "search（重试）",
+            "label": "工具（网络搜索）（重试）",
             "duration_ms": 3887
         },
         {
@@ -170,7 +170,7 @@
             "status": "done",
             "step_index": 2,
             "branch_id": null,
-            "label": "观察结果",
+            "label": "评估（第1轮）",
             "duration_ms": 3888
         },
         {
