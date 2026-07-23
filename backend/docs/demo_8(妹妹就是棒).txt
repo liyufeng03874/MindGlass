@@ -1,0 +1,192 @@
+{
+    "nodes": [
+        {
+            "id": "plan_0_f06e56",
+            "type": "Plan",
+            "data": {
+                "input": "react和plan-and-excute的异同",
+                "output": "用户询问ReAct和Plan-and-Execute两种AI Agent模式的异同。这是一个关于大模型应用架构的技术概念对比。虽然属于技术知识，但网络上有大量最新的分析文章、博客和框架文档（如LangChain）对此有详细讨论。使用search工具可以获取全面且最新的对比信息。",
+                "steps": [
+                    {
+                        "tool": "search",
+                        "description": "搜索ReAct和Plan-and-Execute Agent模式的定义、工作原理及两者的异同对比",
+                        "params": {
+                            "query": "ReAct和Plan-and-Execute Agent模式异同对比"
+                        }
+                    }
+                ],
+                "decision": "need_more",
+                "reasoning": "用户询问ReAct和Plan-and-Execute两种AI Agent模式的异同。这是一个关于大模型应用架构的技术概念对比。虽然属于技术知识，但网络上有大量最新的分析文章、博客和框架文档（如LangChain）对此有详细讨论。使用search工具可以获取全面且最新的对比信息。",
+                "plan_count": 1,
+                "if_need_more": null,
+                "if_terminate": null
+            },
+            "status": "done",
+            "step_index": 0,
+            "branch_id": null,
+            "label": "规划",
+            "duration_ms": 157165
+        },
+        {
+            "id": "toolcall_1_25c370",
+            "type": "ToolCall",
+            "data": {
+                "tool": "search",
+                "params": {
+                    "query": "ReAct和Plan-and-Execute Agent模式异同对比"
+                },
+                "result": {
+                    "tool": "search",
+                    "params": {
+                        "query": "ReAct和Plan-and-Execute Agent模式异同对比"
+                    },
+                    "result": {
+                        "query": "ReAct和Plan-and-Execute Agent模式异同对比",
+                        "answer": "ReAct is flexible for dynamic tasks; Plan-and-Execute is structured for complex, multi-step tasks; both differ in approach and use case.",
+                        "results": [
+                            {
+                                "title": "ReAct vs 其他单Agent 模式（Plan-and-Execute",
+                                "url": "https://blog.csdn.net/fenglingguitar/article/details/160768127",
+                                "snippet": "ReAct 是基础，Plan-and-Execute 是结构，Reflexion 是优化。 理解三者的区别，你就可以：. 根据业务选择合适模式; 控制复杂度; 平衡成本与效果. 下一篇，我们"
+                            },
+                            {
+                                "title": "主流 Agent 模式对比：ReAct、Plan-and-Execute、Reflexion 等",
+                                "url": "https://blog.csdn.net/fenglingguitar/article/details/159807407",
+                                "snippet": "# 主流 Agent 模式对比：ReAct、Plan-and-Execute、Reflexion 等. Image 122026 AI Agent 从入门到企业落地实战. ReAct 是最经典、也最广泛使用的 Agent 模式。. ### ReAct 的优点. Plan-and-Execute 是另一种非常主流的 Agent 模式。. Plan-and-Execute Agent 会先生成一个完整计划：. ### Plan-and-Execute 的优点. ### Reflexion 的优点. 2026 年越来越流行的趋势，是 Multi-Agent。. ### Multi-Agent 的优点. _ReAct_ vs 其他单 _Agent_ _模式_（_Plan_ _-_ _and_ _-_ _Execute_、_Reflexion_）简单 _对比_. 本文 _对比_ 了三种单 _Agent_ _模式_：_ReAct_（边做边想，实时决策）、_Plan_ _-_ _and_ _-_ _Execute_（先规划再执行，结构驱动）和 _Reflexion_（执行后反思，自我优化）。_ReAct_ 简单灵活适合简单任务；_Plan_ _-_ _and_ _-_ _Execute_ 结构化强适合多步骤复杂任务；_Reflexion_ 通过迭代优化提升准确率但成本较高。建议从 _ReAct_ 入门，根据业务需求组合使用，平衡复杂度与效果。. 本文全面介绍 _Agent_ 开发从概念到生产的完整流程，详细解析 _Agent_ 与ChatBot/Workflow的区别，深入探讨 _ReAct_、_Plan_ _-_ _and_ _-_ _Execute_ 等四种 _主流_ 架构 _模式_ 及适用场景，_对比_ LangGraph、Claude SDK等 _主流_ 框架特点，并通过纯代码实现 _ReAct_ _Agent_ 实战案例。最后提供生产环境部署的关键考量，包括成本控制、延迟优化、可靠性保障等，帮助开发者构建可落地的 _Agent_ 系统。. _2026_ _-_ 05 _-_ 16 _-_ 多 _Agent_ 协作框架深度实战 _-_ 从 _ReAct_ 到 _Plan_ _-_ _and_ _-_ _Execute_ 全架构演进. 大语言模型（LLM）作为当前人工智能的核心技术，通过海量数据训练获得了强大的语言理解和生成能力。然而，其本质是一个基于概率预测的文本生成器，缺乏自主执行任务和复杂推理的内在机制。为了解决这一局限，_AI_ _Agent_ 技术应运而生，它通过构建“规划 _-_ 工具 _-_ 记忆”的核心架构，赋予LLM“思考 _-_ 行动 _-_ 观察”的闭环能力，从而将静态的知识库转化为能动态交互、解决实际问题的智能体。其核心价值在于实现了从被动问答到主动任务执行的跨越，广泛应用于智能客服、自动化办公、代码生成与数据分析等场景。本文聚焦于实现这一能力的核心设计模. _Agent_ 是能自主感知环境、做出决策、采取行动来完成任务的 _AI_ 系统。关键词是\"自主\"——你给它一个目标，它自己决定怎么实现，而不是你一步步告诉它做什么。_Agent_ 定义：能自主决策、使用工具、完成复杂任务的 _AI_ 系统架构 _模式_：_ReAct_（最通用）、_Plan_ _-_ _and_ _-_ _Execute_（复杂任务）、_Reflexion_（可验证任务）、多 _Agent_（大型项目）框架选择：理解原理用纯代码，快速原型用 Dify，生产用 LangGraph/Claude SDK核心循环。. Reflect更规范的表述是 _Reflexion_（反思范式），它与 _ReAct_、_Plan_ _-_ _Execute_ 均为 _AI_ _Agent_ 领域 _主流_ 研发范式. _Agent_ 的设计 _模式_ 总结：_ReAct_、_Plan_ _-_ _Execute_ 和 _Reflexion_ 工程 _对比_."
+                            },
+                            {
+                                "title": "ReAct vs Plan-and-Execute：LLM Agent 模式实战对比 - muzinan110 - 博客园",
+                                "url": "https://www.cnblogs.com/muzinan110/p/18552824",
+                                "snippet": "# ReAct vs Plan-and-Execute：LLM Agent 模式实战对比. 在构建 LLM Agent 系统时，选择合适的推理模式至关重要。本文将深入对比两种主流的 Agent 推理模式：ReAct（Reasoning and Acting）和 Plan-and-Execute，通过实战案例帮助你做出正确的技术选型。. ### 1.2 Plan-and-Execute 模式. ### 1.1 ReAct 模式. You have access to the following tools: {tools} Use the following format: Thought: you should always think about what to do Action: the action to take, should be one of [{tool_names}] Action Input: the input to the action Observation: the result of the action ... Task: {input} Create a plan with the following format: 1. Follow the plan and execute each step using available tools: {tools} Plan: {plan} Current step: {current_step} Previous results: {previous_results} Use the following format: Thought: think about the current step Action: the action to take Action Input: the input for the action\"\"\". ### 2.2 基于 LangChain 的 Plan-and-Execute 实现. ### 2.1 基于 LangChain 的 ReAct 实现. from langchain.agents import PlanAndExecute from langchain.chat_models import ChatOpenAI def create_plan_and_execute_agent(tools, llm): return PlanAndExecute( planner=create_planner(llm), executor=create_executor(llm, tools), verbose=True ) # 使用示例 llm = ChatOpenAI(temperature=0) agent = create_plan_and_execute_agent(tools, llm) result = agent.run(\"What is the population of China multiplied by 2?\"). ### 5.2 选择 Plan-and-Execute 的场景."
+                            },
+                            {
+                                "title": "大模型 Agent 架构：React 与 Plan and Execute 核心区别大模型 Agent 架构：React - 掘金",
+                                "url": "https://juejin.cn/post/7616666752521093120",
+                                "snippet": "# 大模型 Agent 架构：React 与 Plan and Execute 核心区别. ### React 架构. 核心是循环思考、行动、观察的动态迭代过程。每一步先产生思维链决定调用工具，执行后观察工具返回结果（observation），再决定下一步行动。优点是灵活性极强，适合环境持续变化或需要频繁搜集外部信息的任务；缺点是属于贪心算法，中间步骤若出现偏差或工具返回干扰信息，易导致目标漂移甚至彻底跑偏。. ### Plan and Execute 架构. 核心是规划与执行解耦。先由规划器将大任务拆分为子任务列表（task list），再由执行器依次执行，最后检查任务完成情况。优点是稳定性高、不易跑题，且子任务无依赖关系时可并行执行，能节省时间和 token；适合宏观长链路、逻辑复杂的任务。. ### 架构对比与任务选择. React 适合微观短链路、需及时反馈的任务（如查天气、搜实时新闻）；Plan and Execute 适合宏观长链路、逻辑复杂的任务（如写行业调研报告、开发代码模块）。简单说，React 是 “动态探路者”，Plan and Execute 是 “宏观建筑师”。. ### 落地难点及解决方案. 难点一：React 的任务漂移和死循环（如忘记初始目标或在错误中反复重试）。解决方案：引入 self reflection 自我反思机制（每三步检查是否偏离目标），配合状态机用代码约束动作跳转逻辑，避免无限循环。难点二：Plan and Execute 的计划僵化（执行结果变化导致后续计划失效）。解决方案：升级为 dynamic replanning 动态重规划执行器，每步返回状态码，结果偏离预期时触发规划器更新后续步骤。. ### 混合架构趋势. 企业级应用趋势是 “以 Plan 稳大局，以 React 做局部” 的混合架构。外层用强大规划器定大方向，处理具体子任务时嵌套 React 循环灵活应对。此架构可解决记忆管理导致的 token 爆炸问题，通过通用逻辑微调降低成本，是当前 Agent 架构的发展方向。."
+                            },
+                            {
+                                "title": "Agent范式：ReAct、Plan-and-Execute 和multi-agent",
+                                "url": "https://www.heartthinkdo.com?p=4293",
+                                "snippet": "ReAct、Plan-and-Execute 和multi-agent 是三种不同的智能体(Agent)工作框架,核心区别体现在目标定位、工作流程和适用场景上,具体对比如下"
+                            }
+                        ],
+                        "count": 5
+                    }
+                },
+                "description": "搜索ReAct和Plan-and-Execute Agent模式的定义、工作原理及两者的异同对比",
+                "parallel_group_id": null
+            },
+            "status": "done",
+            "step_index": 1,
+            "branch_id": null,
+            "label": "工具（网络搜索）",
+            "duration_ms": 3068
+        },
+        {
+            "id": "observe_2_fded13",
+            "type": "Observe",
+            "data": {
+                "source": [
+                    "toolcall_1_25c370"
+                ],
+                "observe_output": {
+                    "round": 1,
+                    "summary": "本轮检索清晰对比了ReAct与Plan-and-Execute两种LLM Agent架构的核心机制、优缺点及适用场景。ReAct采用“思考-行动-观察”的实时动态循环，灵活但易目标漂移；Plan-and-Execute采用“先规划后执行”的解耦结构，稳定适合长链路复杂任务，但计划易僵化。当前业界趋势是结合两者优势的混合架构。",
+                    "key_findings": [
+                        "核心机制差异：ReAct是“边做边想”的实时迭代循环（Thought-Action-Observation），依赖单步动态决策；Plan-and-Execute是“先规划再执行”的解耦架构，由Planner生成完整任务列表后交由Executor逐步执行。",
+                        "优缺点对比：ReAct灵活性高、适合动态短任务，但属贪心策略易出现目标漂移或死循环；Plan-and-Execute结构稳定、无依赖子任务可并行执行、适合宏观长链路任务，但计划僵化难以应对执行过程中的环境变化。",
+                        "适用场景与架构演进：ReAct适合需频繁交互或实时反馈的微观任务；Plan-and-Execute适合逻辑复杂的宏观任务。当前企业级应用趋势是“Plan稳大局+ReAct做局部”的混合架构，以兼顾全局稳定性与局部灵活性。"
+                    ],
+                    "conflicts": [],
+                    "duplicates_removed": 2,
+                    "new_info_vs_previous": "首轮检索"
+                },
+                "summary": "本轮检索清晰对比了ReAct与Plan-and-Execute两种LLM Agent架构的核心机制、优缺点及适用场景。ReAct采用“思考-行动-观察”的实时动态循环，灵活但易目标漂移；Plan-and-Execute采用“先规划后执行”的解耦结构，稳定适合长链路复杂任务，但计划易僵化。当前业界趋势是结合两者优势的混合架构。",
+                "key_findings": [
+                    "核心机制差异：ReAct是“边做边想”的实时迭代循环（Thought-Action-Observation），依赖单步动态决策；Plan-and-Execute是“先规划再执行”的解耦架构，由Planner生成完整任务列表后交由Executor逐步执行。",
+                    "优缺点对比：ReAct灵活性高、适合动态短任务，但属贪心策略易出现目标漂移或死循环；Plan-and-Execute结构稳定、无依赖子任务可并行执行、适合宏观长链路任务，但计划僵化难以应对执行过程中的环境变化。",
+                    "适用场景与架构演进：ReAct适合需频繁交互或实时反馈的微观任务；Plan-and-Execute适合逻辑复杂的宏观任务。当前企业级应用趋势是“Plan稳大局+ReAct做局部”的混合架构，以兼顾全局稳定性与局部灵活性。"
+                ],
+                "conflicts": [],
+                "duplicates_removed": 2,
+                "round": 1
+            },
+            "status": "done",
+            "step_index": 2,
+            "branch_id": null,
+            "label": "评估（第1轮）",
+            "duration_ms": 164952
+        },
+        {
+            "id": "plan_3_15d004",
+            "type": "Plan",
+            "data": {
+                "input": "react和plan-and-excute的异同",
+                "output": "已收集信息清晰对比了ReAct与Plan-and-Execute的核心机制、优缺点及适用场景，差异点覆盖全面；两者同属LLM Agent架构的共性（均依赖大模型推理、外部工具交互与复杂任务分解）已明确，信息足以完整回答异同问题。",
+                "steps": [],
+                "decision": "sufficient",
+                "reasoning": "已收集信息清晰对比了ReAct与Plan-and-Execute的核心机制、优缺点及适用场景，差异点覆盖全面；两者同属LLM Agent架构的共性（均依赖大模型推理、外部工具交互与复杂任务分解）已明确，信息足以完整回答异同问题。",
+                "plan_count": 2,
+                "if_need_more": {
+                    "missing_aspects": [],
+                    "suggested_queries": []
+                },
+                "if_terminate": {
+                    "reason": "",
+                    "partial_answer_note": ""
+                }
+            },
+            "status": "done",
+            "step_index": 3,
+            "branch_id": null,
+            "label": "决策：信息充足",
+            "duration_ms": 31655
+        },
+        {
+            "id": "answer_4_057361",
+            "type": "Answer",
+            "data": {
+                "input": "react和plan-and-excute的异同",
+                "output": "基于提供的评估报告，ReAct 与 Plan-and-Execute 的异同对比如下：\n\n### 一、 相同点\n两者均属于 **LLM Agent（大语言模型智能体）架构**，具备以下核心共性：\n- **依赖大模型推理**：均以 LLM 作为核心决策与逻辑推理引擎。\n- **支持外部工具交互**：均具备调用外部工具或环境以获取信息、执行操作的能力。\n- **复杂任务分解**：均能将复杂目标拆解为可执行的步骤或子任务。\n\n### 二、 不同点\n| 对比维度 | ReAct | Plan-and-Execute |\n| :--- | :--- | :--- |\n| **核心机制** | **“边做边想”的实时动态循环**（Thought-Action-Observation）。依赖单步动态决策，每完成一步即根据观察结果重新思考下一步。 | **“先规划后执行”的解耦架构**。由 Planner 模块先生成完整的任务列表/计划，再交由 Executor 模块按步骤执行。 |\n| **优点** | 灵活性极高，能根据实时反馈快速调整策略，适应性强。 | 结构稳定，宏观把控力强；无依赖的子任务支持并行执行，整体效率更高。 |\n| **缺点** | 属于贪心策略，缺乏全局视角，易出现**目标漂移**或陷入**死循环**。 | 计划较为**僵化**，难以灵活应对执行过程中突发的环境变化或意外情况。 |\n| **适用场景** | 适合需频繁交互、依赖实时反馈的**微观/动态短任务**。 | 适合逻辑严密、步骤繁多的**宏观/长链路复杂任务**。 |\n\n### 三、 架构演进趋势\n当前业界已不再局限于单一架构，而是趋向于**混合架构**：采用 **“Plan 稳大局 + ReAct 做局部”** 的策略。即利用 Plan-and-Execute 保证整体任务链路的稳定性与方向性，同时在具体子任务或动态交互环节中引入 ReAct 机制，以兼顾全局稳定性与局部灵活性。\n\n### 四、 总结\n- **ReAct** 胜在**灵活与实时适应**，但缺乏长远规划，适合短平快或环境多变的任务。\n- **Plan-and-Execute** 胜在**稳定与全局统筹**，但动态应变能力较弱，适合长链路、强逻辑的任务。\n在实际落地中，可根据任务对“实时灵活性”与“全局稳定性”的侧重进行选择，或直接采用两者融合的混合架构以发挥最大效能。",
+                "observations_count": 1,
+                "degraded": false
+            },
+            "status": "done",
+            "step_index": 4,
+            "branch_id": null,
+            "label": "最终回答",
+            "duration_ms": 55110
+        }
+    ],
+    "edges": [
+        {
+            "from": "plan_0_f06e56",
+            "to": "toolcall_1_25c370",
+            "type": "Normal"
+        },
+        {
+            "from": "toolcall_1_25c370",
+            "to": "observe_2_fded13",
+            "type": "Normal"
+        },
+        {
+            "from": "observe_2_fded13",
+            "to": "plan_3_15d004",
+            "type": "Normal"
+        },
+        {
+            "from": "plan_3_15d004",
+            "to": "answer_4_057361",
+            "type": "Normal"
+        }
+    ],
+    "branches": [],
+    "meta": {
+        "current_step_index": 4,
+        "total_steps": 5,
+        "query": "react和plan-and-excute的异同",
+        "run_id": "run_20260723_005623",
+        "plan_count": 2,
+        "run_started_at": 1784739383.628665
+    }
+}
