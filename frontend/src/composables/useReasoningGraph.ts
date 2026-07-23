@@ -123,16 +123,11 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       const isDegraded = node.type === 'Answer' && node.data?.degraded === true
       const borderColor = isDegraded ? '#fa8c16' : (isDeprecated ? '#d9d9d9' : colorScheme.border)
 
-      // 废弃节点 label 追加角标
-      const displayLabel = isDeprecated
-        ? `${node.label}  🚫 废弃`
-        : node.label
-
       const flowNode: Node = {
         id: node.id,
         position: { x: xPosition, y: yPosition },
         data: {
-          label: displayLabel,
+          label: node.label,
           type: node.type,
           status: node.status,
           data: node.data,
@@ -151,7 +146,6 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           minWidth: '200px',
           opacity: isDeprecated ? 0.45 : isPending ? 0.6 : 1,
           boxShadow: isPending ? 'none' : isDegraded ? '0 0 8px rgba(250,140,22,0.4)' : isDeprecated ? 'inset 0 0 0 2px #d9d9d9' : '0 2px 8px rgba(0,0,0,0.08)',
-          // 废弃节点加斜线纹理（通过 CSS 背景实现）
           ...(isDeprecated ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)' } : {}),
         },
       }

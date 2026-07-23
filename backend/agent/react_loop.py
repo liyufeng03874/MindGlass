@@ -618,7 +618,8 @@ class ReactLoop:
                     if target and target.status not in ("branch", "replaced"):
                         target.status = "replaced"
                         target.data["replaced"] = True
-                        if target.type in ("Observe", "Answer"):
+                        # Plan/Observe/Answer 级联废弃时统一追加（废弃）后缀
+                        if target.type in ("Plan", "Observe", "Answer"):
                             target.label = f"{target.label or target.type}（废弃）"
                         replaced_ids.add(target.id)
                         yield self._emit("node_complete", {"node": target.to_dict(), "graph": self.store.to_dict()})

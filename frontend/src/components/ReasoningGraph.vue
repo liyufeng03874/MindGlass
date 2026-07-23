@@ -34,6 +34,9 @@
 
         <!-- ToolCall 编辑 -->
         <template v-if="editingNode.type === 'ToolCall'">
+          <div v-if="isDeprecatedNode" class="deprecated-hint-panel">
+            ⚠️ 此工具调用已被废弃（被重试截断），仅保留供对比参考。
+          </div>
           <label>工具选择</label>
           <select v-model="editForm.tool" class="select-field">
             <option value="search">🔍 搜索 (search)</option>
@@ -57,9 +60,13 @@
 
         <!-- Plan 只读展示，不提供干预：要改规划不如重新输一个新 query -->
         <template v-else-if="editingNode.type === 'Plan'">
+          <!-- 废弃提示：与 ToolCall/Observe 统一的黄色 warning 风格 -->
+          <div v-if="isDeprecatedNode" class="deprecated-hint-panel">
+            ⚠️ 此决策来自被废弃的推理分支，已被新版本替代，仅供参考对比。
+          </div>
           <!-- 决策节点（Plan 2+）：展示决策 + 理由 -->
           <template v-if="isDecisionNode">
-            <div class="decision-banner" :class="`decision-${planDecision}`">
+            <div class="decision-banner" :class="isDeprecatedNode ? 'decision-deprecated' : `decision-${planDecision}`">
               {{ DECISION_LABELS[planDecision] || planDecision }}
             </div>
             <label>决策理由</label>
@@ -99,6 +106,9 @@
 
         <!-- Observe 只展示 -->
         <template v-else-if="editingNode.type === 'Observe'">
+          <div v-if="isDeprecatedNode" class="deprecated-hint-panel">
+            ⚠️ 此评估结果已被新版本替代（来自废弃的搜索决策），仅供参考对比。
+          </div>
           <div v-if="observeResult" class="output-preview observe-only">
             <label>👁️ 评估结果</label>
             <div class="answer-content" v-html="md.render(observeResult)"></div>
@@ -315,6 +325,12 @@ function toolLabel(tool: string): string {
   const map: Record<string, string> = { search: '网络搜索', rag_retrieve: 'RAG 检索' }
   return map[tool] || tool
 }
+
+/** 是否为废弃节点（branch / replaced 状态） */
+const isDeprecatedNode = computed(() => {
+  const s = editingNode.value?.status
+  return s === 'branch' || s === 'replaced' || s === 'discarded'
+})
 
 /** 是否为决策节点（Plan 2+）；Plan 1 是初始规划 */
 const isDecisionNode = computed(() => (editingNode.value?.data?.plan_count ?? 1) >= 2)
@@ -595,6 +611,17 @@ watch(
   font-family: 'Menlo', 'Monaco', monospace;
 }
 
+/* 废弃提示横幅（ToolCall/Observe 面板顶部） */
+.deprecated-hint-panel {
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  color: #ad8b00;
+  font-size: 13px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
 label {
   display: block;
   font-size: 13px;
@@ -651,6 +678,12 @@ label {
   background: #fff2f0;
   color: #cf1322;
   border: 1px solid #ffccc7;
+}
+/* 废弃节点的决策横幅：统一为中性灰，不再显示红色 error 风格 */
+.decision-deprecated {
+  background: #f5f5f5;
+  color: #8c8c8c;
+  border: 1px solid #d9d9d9;
 }
 
 .info-list {

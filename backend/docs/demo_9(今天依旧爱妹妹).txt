@@ -348,7 +348,7 @@
             "status": "replaced",
             "step_index": 6,
             "branch_id": null,
-            "label": "决策：强制终止"
+            "label": "决策：强制终止（废弃）"
         },
         {
             "id": "answer_7_492bd8",
