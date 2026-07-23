@@ -97,15 +97,18 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           return !parallelNodeIds.has(n.id)
         })
         if (group.length > 1) {
-          const sorted = group.slice().sort((a, b) => {
-            const aBad = a.status === 'branch' || a.status === 'replaced'
-            const bBad = b.status === 'branch' || b.status === 'replaced'
-            if (aBad && !bBad) return -1
-            if (!aBad && bBad) return 1
-            return 0
-          })
-          const idx = sorted.findIndex(n => n.id === node.id)
-          xPosition = centerX - 100 + (idx - (sorted.length - 1) / 2) * spacingX
+          // 非并行多节点同 step：废弃节点靠左、活跃节点居中
+          // 使用比并行组更宽的间距，避免宽标签（如最终回答）重叠
+          const rowSpacing = 320
+          const active = group.filter(n => n.status !== 'branch' && n.status !== 'replaced')
+          const deprecated = group.filter(n => n.status === 'branch' || n.status === 'replaced')
+          if (isDeprecated) {
+            const dIdx = deprecated.findIndex(n => n.id === node.id)
+            xPosition = centerX - 100 - rowSpacing * (deprecated.length - dIdx)
+          } else {
+            const aIdx = active.findIndex(n => n.id === node.id)
+            xPosition = centerX - 100 + (aIdx - (active.length - 1) / 2) * rowSpacing
+          }
         } else if (group.length === 1) {
           // 单个非并行节点与并行组共享 step_index：偏移到并行组左侧
           const hasParallelSiblings = activeNodes.some(n =>
@@ -173,11 +176,14 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       const isBranchEdge = edge.type === 'Branch'
       const isPendingEdge = edge.type === 'Pending'
 
-      // 检查目标节点是否为 replaced
+      // 检查边的任一端点是否为 branch/replaced——是则整条边置灰
       const targetNode = graph.value.nodes.find(n => n.id === edge.to)
-      const isReplacedEdge = targetNode?.status === 'replaced'
+      const sourceNode = graph.value.nodes.find(n => n.id === edge.from)
+      const endpointDeprecated =
+        targetNode?.status === 'replaced' || targetNode?.status === 'branch' ||
+        sourceNode?.status === 'replaced' || sourceNode?.status === 'branch'
 
-      const isDimmed = isBranchEdge || isReplacedEdge
+      const isDimmed = isBranchEdge || endpointDeprecated
 
       edges.push({
         id: `edge_${idx}`,
@@ -189,7 +195,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           strokeWidth: isDimmed ? 1 : 2,
           ...(isDimmed ? { strokeDasharray: '4,4' } : (style.dashed ? { strokeDasharray: '5,5' } : {})),
         },
-        markerEnd: isBranchEdge || isPendingEdge || isReplacedEdge
+        markerEnd: isBranchEdge || isPendingEdge || endpointDeprecated
           ? undefined
           : {
               width: 12,

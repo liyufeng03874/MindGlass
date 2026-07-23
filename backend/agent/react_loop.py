@@ -662,7 +662,9 @@ class ReactLoop:
             self._mark_node_duration(tc_node, retry_start)
             self.store.add_node(tc_node)
             if prev_id:
-                self._add_edge(prev_id, tc_node.id)
+                # 重试节点属于并行组时用 Parallel 边，与存活兄弟节点的绿色保持一致
+                edge_type = "Parallel" if tc_node.data.get("parallel_group_id") else "Normal"
+                self._add_edge(prev_id, tc_node.id, edge_type=edge_type)
             self._last_node = tc_node
             yield self._emit_last_node()
 

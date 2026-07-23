@@ -115,12 +115,17 @@ export function useAgentGraph() {
         //   Plan   → 待决策（Plan 之后不确定是 ToolCall 还是 Answer）
         //   ToolCall → Observe（固定）
         //   Observe  → Plan（固定，Observe 之后一定是 Plan）
-        if (node.type === 'Plan') {
-          pushPendingDecision(node)
-        } else if (node.type === 'ToolCall') {
-          pushPendingObserve(node)
-        } else if (node.type === 'Observe') {
-          pushPendingPlan(node)
+        // 只对活跃节点做预测——废弃/替换节点不产生预测，避免瞬态幽灵节点
+        const isActiveForPredict =
+          node.status !== 'branch' && node.status !== 'replaced' && node.status !== 'discarded'
+        if (isActiveForPredict) {
+          if (node.type === 'Plan') {
+            pushPendingDecision(node)
+          } else if (node.type === 'ToolCall') {
+            pushPendingObserve(node)
+          } else if (node.type === 'Observe') {
+            pushPendingPlan(node)
+          }
         }
 
         if (node.type === 'Answer' && node.status !== 'replaced') {
@@ -194,9 +199,52 @@ export function useAgentGraph() {
     }
   }
 
-  /** ToolCall 之后 → Observe（固定） */
+  /** ToolCall 之后 → Observe（固定）；并行组时把存活兄弟一起连上预测的评估节点 */
   function pushPendingObserve(prevNode: AgentNode) {
+    const pgId = prevNode.data?.parallel_group_id
+    const nextStep = (prevNode.step_index ?? 0) + 1
+
+    if (pgId) {
+      // 复用同 step 已有的 pending Observe，避免多个并行 ToolCall 产生重复预测
+      const existingPending = graph.value.nodes.find(
+        n => n.status === 'pending' && n.type === 'Observe' && n.step_index === nextStep
+      )
+      if (existingPending) {
+        connectGroupToPendingObserve(pgId, existingPending.id)
+        return
+      }
+    }
+
     pushPending(prevNode, 'Observe', '观察结果')
+
+    if (pgId) {
+      const pendingObserve = graph.value.nodes.find(
+        n => n.status === 'pending' && n.type === 'Observe' && n.step_index === nextStep
+      )
+      if (pendingObserve) {
+        connectGroupToPendingObserve(pgId, pendingObserve.id)
+      }
+    }
+  }
+
+  /** 把同一并行组内所有存活（done）的 ToolCall 连接到 pending Observe */
+  function connectGroupToPendingObserve(pgId: string, pendingId: string) {
+    const siblings = graph.value.nodes.filter(
+      n => n.type === 'ToolCall'
+        && n.status === 'done'
+        && n.data?.parallel_group_id === pgId
+    )
+    let added = false
+    for (const sib of siblings) {
+      const hasEdge = graph.value.edges.some(e => e.from === sib.id && e.to === pendingId)
+      if (!hasEdge) {
+        graph.value.edges.push({ from: sib.id, to: pendingId, type: 'Pending' })
+        added = true
+      }
+    }
+    if (added) {
+      graph.value.edges = [...graph.value.edges]
+    }
   }
 
   /** Observe 之后 → Plan（固定，Observe 之后一定是 Plan 做决策） */
