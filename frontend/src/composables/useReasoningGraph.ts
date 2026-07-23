@@ -106,6 +106,14 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           })
           const idx = sorted.findIndex(n => n.id === node.id)
           xPosition = centerX - 100 + (idx - (sorted.length - 1) / 2) * spacingX
+        } else if (group.length === 1) {
+          // 单个非并行节点与并行组共享 step_index：偏移到并行组左侧
+          const hasParallelSiblings = activeNodes.some(n =>
+            n.step_index === node.step_index && parallelNodeIds.has(n.id)
+          )
+          if (hasParallelSiblings) {
+            xPosition = centerX - 100 - spacingX
+          }
         }
       }
 

@@ -669,6 +669,24 @@ class ReactLoop:
             self._last_raw_results.append(tool_result)
             self._last_tc_node_ids.append(tc_node.id)
 
+        # ── 4.5 将同并行组中未被废弃的兄弟 ToolCall 纳入 Observe ──
+        # 找到被编辑节点的 parallel_group_id
+        sibling_pg_id = None
+        for node_data in old_nodes:
+            existing = self.store.get_node_by_id(node_data["id"])
+            if existing and existing.data.get("parallel_group_id"):
+                sibling_pg_id = existing.data["parallel_group_id"]
+                break
+
+        if sibling_pg_id:
+            for n in self.store.nodes:
+                if (n.type == "ToolCall"
+                        and n.status == "done"
+                        and n.data.get("parallel_group_id") == sibling_pg_id
+                        and n.id not in self._last_tc_node_ids):
+                    self._last_tc_node_ids.append(n.id)
+                    self._last_raw_results.append(n.data.get("result", {}))
+
         # ── 5. Observe（结构化评估）──
         self.step_index += 1
         async for event in self._emit_observe(observe_outputs):
