@@ -9,7 +9,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from state.store import ReasoningGraphStore
+from state.models import ReasoningNode, ReasoningEdge
 from agent.react_loop import ReactLoop
+
+# Admin 持久化层
+from admin.persistence import init_db as admin_init_db, save_run as admin_save_run
+from admin.persistence import get_overview as admin_get_overview
+from admin.persistence import get_runs as admin_get_runs
+from admin.persistence import get_run_snapshot as admin_get_run_snapshot
+
+# 初始化 admin DB 表结构
+admin_init_db()
 
 app = FastAPI(title="MindGlass", description="可观测多步推理 Agent")
 
@@ -52,8 +62,19 @@ async def run_agent(query: str = Query(...)):
     loop = ReactLoop(_store)
 
     async def event_stream():
-        async for event in loop.run(query):
-            yield event
+        """SSE 事件流，run 完成后自动落盘快照"""
+        try:
+            async for event in loop.run(query):
+                yield event
+        finally:
+            # SSE 流结束 → run 已完成 → 保存快照
+            try:
+                snapshot = _store.to_dict()
+                if snapshot.get("nodes"):
+                    admin_save_run(snapshot)
+            except Exception as e:
+                # 落盘失败不影响用户端，仅日志记录
+                print(f"[admin] 保存 run 快照失败: {e}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -172,3 +193,31 @@ if __name__ == "__main__":
     port = int(os.getenv("MINDGLASS_PORT", "8002"))
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
+
+
+# ──────────────────────────────────────────────────────────────
+# Admin 后台管理接口（新增，不影响现有用户端）
+# ──────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/overview")
+def admin_overview():
+    """总览指标：total_runs, answer_rate, degraded_rate, tool_error_total, avg_duration_ms"""
+    return admin_get_overview()
+
+
+@app.get("/api/admin/runs")
+def admin_runs(
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """run 列表（分页），返回统计字段列（不含完整快照）"""
+    return admin_get_runs(limit=limit, offset=offset)
+
+
+@app.get("/api/admin/runs/{run_id}")
+def admin_run_detail(run_id: str):
+    """单条完整快照 {nodes,edges,branches,meta}，供前端思维重现"""
+    snapshot = admin_get_run_snapshot(run_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail=f"run_id={run_id} 不存在")
+    return snapshot

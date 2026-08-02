@@ -1,0 +1,509 @@
+<template>
+  <div class="admin-page">
+    <header class="admin-header">
+      <router-link to="/" class="back-link">← 返回首页</router-link>
+      <h1>🧠 MindGlass 后台管理</h1>
+      <span class="subtitle">Run 历史总览 · 思维重现</span>
+    </header>
+
+    <!-- 总览指标卡 -->
+    <section class="overview-cards" v-if="overview">
+      <div class="card">
+        <div class="card-value">{{ overview.total_runs }}</div>
+        <div class="card-label">总 Run 数</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ (overview.answer_rate * 100).toFixed(1) }}%</div>
+        <div class="card-label">完答率</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ (overview.degraded_rate * 100).toFixed(1) }}%</div>
+        <div class="card-label">降级率</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ overview.tool_error_total }}</div>
+        <div class="card-label">工具失败次数</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ formatDurationMs(overview.avg_duration_ms) }}</div>
+        <div class="card-label">平均耗时</div>
+      </div>
+    </section>
+    <section class="overview-cards" v-else>
+      <div class="card"><div class="card-value">加载中...</div></div>
+    </section>
+
+    <!-- Run 列表 -->
+    <section class="run-list-section">
+      <table class="run-table">
+        <thead>
+          <tr>
+            <th>Run ID</th>
+            <th>Query</th>
+            <th>Final Answer</th>
+            <th>节点数</th>
+            <th>Plan</th>
+            <th>ToolCall</th>
+            <th>Observe</th>
+            <th>Answer</th>
+            <th>耗时</th>
+            <th>降级</th>
+            <th>工具错误</th>
+            <th>时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="run in runs" :key="run.run_id">
+            <td class="id-cell"><code>{{ run.run_id }}</code></td>
+            <td class="query-cell">{{ run.query }}</td>
+            <td class="answer-cell" :title="run.final_answer || '无'">
+              {{ truncate(run.final_answer || '无', 40) }}
+            </td>
+            <td>{{ run.total_nodes }}</td>
+            <td>{{ run.plan_count }}</td>
+            <td>{{ run.toolcall_count }}</td>
+            <td>{{ run.observe_count }}</td>
+            <td>{{ run.answer_count }}</td>
+            <td>{{ formatDurationMs(run.total_duration_ms) }}</td>
+            <td>
+              <span v-if="run.degraded" class="badge degraded">⚠️ 降级</span>
+              <span v-else class="badge ok">✓</span>
+            </td>
+            <td>{{ run.tool_error_count }}</td>
+            <td class="time-cell">{{ formatTime(run.created_at) }}</td>
+            <td>
+              <button class="replay-btn" @click="openReplay(run.run_id)">🔍 思维重现</button>
+            </td>
+          </tr>
+          <tr v-if="runs.length === 0">
+            <td colspan="13" class="empty-row">暂无数据</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 分页 -->
+      <div class="pagination" v-if="total > limit">
+        <button :disabled="offset === 0" @click="loadPage(offset - limit)">← 上一页</button>
+        <span class="page-info">第 {{ Math.floor(offset / limit) + 1 }} 页 / 共 {{ Math.ceil(total / limit) }} 页</span>
+        <button :disabled="offset + limit >= total" @click="loadPage(offset + limit)">下一页 →</button>
+      </div>
+    </section>
+
+    <!-- 思维重现弹窗 -->
+    <div v-if="showReplay" class="replay-overlay" @click.self="closeReplay">
+      <div class="replay-dialog">
+        <div class="replay-header">
+          <h2>🔍 思维重现 — {{ replayRunId }}</h2>
+          <button class="close-btn" @click="closeReplay">✕</button>
+        </div>
+        <div class="replay-body">
+          <div v-if="replayLoading" class="replay-loading">
+            <p>加载中...</p>
+          </div>
+          <ReasoningGraph
+            v-else-if="replayGraph"
+            :graph="replayGraph"
+            :isRunning="false"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import ReasoningGraph from '../components/ReasoningGraph.vue'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+
+// ── 指标 ──
+interface Overview {
+  total_runs: number
+  answer_rate: number
+  degraded_rate: number
+  tool_error_total: number
+  avg_duration_ms: number
+}
+const overview = ref<Overview | null>(null)
+
+// ── 列表 ──
+interface RunRow {
+  run_id: string
+  query: string
+  final_answer: string | null
+  total_nodes: number
+  plan_count: number
+  toolcall_count: number
+  observe_count: number
+  answer_count: number
+  total_duration_ms: number
+  degraded: boolean
+  tool_error_count: number
+  created_at: string
+}
+const runs = ref<RunRow[]>([])
+const total = ref(0)
+const limit = ref(20)
+const offset = ref(0)
+
+// ── 思维重现 ──
+const showReplay = ref(false)
+const replayRunId = ref('')
+const replayGraph = ref<any>(null)
+const replayLoading = ref(false)
+
+async function loadOverview() {
+  try {
+    const res = await fetch(`${API_BASE}/admin/overview`)
+    overview.value = await res.json()
+  } catch (e) {
+    console.error('加载 overview 失败:', e)
+  }
+}
+
+async function loadRuns() {
+  try {
+    const res = await fetch(`${API_BASE}/admin/runs?limit=${limit.value}&offset=${offset.value}`)
+    const data = await res.json()
+    runs.value = data.runs || []
+    total.value = data.total || 0
+  } catch (e) {
+    console.error('加载 runs 失败:', e)
+  }
+}
+
+function loadPage(newOffset: number) {
+  offset.value = Math.max(0, newOffset)
+  loadRuns()
+}
+
+async function openReplay(runId: string) {
+  replayRunId.value = runId
+  replayGraph.value = null
+  replayLoading.value = true
+  showReplay.value = true
+
+  try {
+    const res = await fetch(`${API_BASE}/admin/runs/${runId}`)
+    const snapshot = await res.json()
+    replayGraph.value = {
+      nodes: snapshot.nodes || [],
+      edges: snapshot.edges || [],
+      branches: snapshot.branches || [],
+      meta: snapshot.meta || {},
+    }
+  } catch (e) {
+    console.error('加载快照失败:', e)
+  } finally {
+    replayLoading.value = false
+  }
+}
+
+function closeReplay() {
+  showReplay.value = false
+  replayGraph.value = null
+  replayRunId.value = ''
+}
+
+function truncate(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s
+  return s.slice(0, maxLen) + '...'
+}
+
+function formatDurationMs(ms: number): string {
+  if (!ms || ms === 0) return '0ms'
+  if (ms < 1000) return `${ms.toFixed(0)}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+onMounted(() => {
+  loadOverview()
+  loadRuns()
+})
+</script>
+
+<style scoped>
+.admin-page {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.admin-header {
+  background: #fff;
+  padding: 12px 24px;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.back-link {
+  padding: 4px 12px;
+  background: #f0f0f0;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #555;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.back-link:hover {
+  background: #e8e8e8;
+  color: #333;
+}
+
+.admin-header h1 {
+  font-size: 20px;
+  color: #1a1a2e;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #888;
+}
+
+/* 指标卡 */
+.overview-cards {
+  display: flex;
+  gap: 16px;
+  padding: 20px 24px;
+  flex-wrap: wrap;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 16px 24px;
+  min-width: 140px;
+  text-align: center;
+}
+
+.card-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.card-label {
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+
+/* 表格 */
+.run-list-section {
+  padding: 0 24px 24px;
+}
+
+.run-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.run-table th {
+  background: #fafafa;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #666;
+  text-align: left;
+  border-bottom: 1px solid #e8e8e8;
+  white-space: nowrap;
+}
+
+.run-table td {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: middle;
+}
+
+.run-table tr:hover td {
+  background: #f9f9f9;
+}
+
+.id-cell code {
+  background: #f0f0f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.query-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.answer-cell {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #555;
+}
+
+.time-cell {
+  white-space: nowrap;
+  color: #888;
+  font-size: 12px;
+}
+
+.empty-row {
+  text-align: center;
+  padding: 24px;
+  color: #888;
+}
+
+/* Badge */
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.badge.ok {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.badge.degraded {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+/* 重现按钮 */
+.replay-btn {
+  padding: 4px 10px;
+  background: #5b9bd5;
+  border: 1px solid #5b9bd5;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.replay-btn:hover {
+  background: #4a89c4;
+}
+
+/* 分页 */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px;
+}
+
+.pagination button {
+  padding: 6px 16px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+}
+
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination button:hover:not(:disabled) {
+  background: #f0f0f0;
+}
+
+.page-info {
+  font-size: 13px;
+  color: #888;
+}
+
+/* 弹窗 */
+.replay-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.replay-dialog {
+  background: #fff;
+  border-radius: 8px;
+  width: 90%;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.replay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.replay-header h2 {
+  font-size: 16px;
+  color: #1a1a2e;
+}
+
+.close-btn {
+  padding: 4px 12px;
+  background: #ff4d4f;
+  border: 1px solid #ff4d4f;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #fff;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: #ff7875;
+}
+
+.replay-body {
+  flex: 1;
+  overflow: hidden;
+}
+
+.replay-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #888;
+}
+</style>
