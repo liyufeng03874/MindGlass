@@ -14,7 +14,7 @@
     />
 
     <div v-else class="empty-state">
-      <div class="empty-icon">🪞</div>
+      <div class="empty-icon"><MirrorIcon :size="54" /></div>
       <p class="empty-title">投一个问题，看思绪成形</p>
       <p class="empty-sub">推理过程将如星河般在你眼前生长</p>
     </div>
@@ -146,6 +146,7 @@
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { computed, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
+import MirrorIcon from './MirrorIcon.vue'
 import { useReasoningGraph } from '@/composables/useReasoningGraph'
 import type { ReasoningGraph, AgentNode } from '@/types/agent'
 
@@ -454,6 +455,7 @@ watch(
 .empty-icon {
   font-size: 52px;
   margin-bottom: 16px;
+  color: var(--accent);
   filter: drop-shadow(0 0 18px rgba(167, 139, 250, 0.45));
   animation: emptyFloat 4s ease-in-out infinite;
 }

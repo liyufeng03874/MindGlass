@@ -3,7 +3,7 @@
     <div class="messages" ref="messagesRef">
       <!-- 开场白 -->
       <div v-if="messages.length === 0 && initialGreeting" class="message agent greeting">
-        <div class="avatar">🪞</div>
+        <div class="avatar greeting-avatar"><MirrorIcon :size="26" /></div>
         <div class="bubble greeting-bubble">{{ initialGreeting }}</div>
       </div>
 
@@ -40,6 +40,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
 import MarkdownIt from 'markdown-it'
+import MirrorIcon from './MirrorIcon.vue'
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
@@ -136,6 +137,14 @@ function handleSend() {
 .avatar {
   font-size: 24px;
   flex-shrink: 0;
+}
+
+.greeting-avatar {
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.5));
 }
 
 .bubble {

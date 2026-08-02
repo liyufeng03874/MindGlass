@@ -1,7 +1,7 @@
 <template>
   <div class="mindglass">
     <header class="header">
-      <h1>🪞 思镜</h1>
+      <h1><MirrorIcon :size="22" class="title-icon" /> 思镜</h1>
       <span class="subtitle">照见思考的镜子 · 可观测多步推理 Agent</span>
       <div class="status-bar">
         <span :class="['status-dot', { active: connected }]"></span>
@@ -65,6 +65,7 @@
 import { ref, watch, computed, onUnmounted } from 'vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ReasoningGraph from '../components/ReasoningGraph.vue'
+import MirrorIcon from '../components/MirrorIcon.vue'
 import { useAgentGraph } from '../composables/useAgentGraph'
 import { usePhase, derivePhase } from '../composables/usePhase'
 
@@ -124,7 +125,7 @@ const demoLoaded = ref(false)
 const loadingDemo = ref(false)
 /** demo 加载时手动算过耗时，watch 不要覆盖 */
 const demoElapsedLocked = ref(false)
-const initialGreeting = '你好，我是思镜 🪞\n\n我是一面照见思考的镜子——把一个复杂问题拆成一步步推理，全过程摊开在你眼前。投一个问题进来，看思绪如何成形吧～'
+const initialGreeting = '你好，我是思镜 ✨\n\n我是一面照见思考的镜子——把一个复杂问题拆成一步步推理，全过程摊开在你眼前。投一个问题进来，看思绪如何成形吧～'
 
 function onSend(query: string) {
   sendMessage(query)
@@ -233,6 +234,14 @@ function clearDemo() {
   font-size: 20px;
   color: var(--text-h);
   letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title-icon {
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.55));
 }
 
 .subtitle {
