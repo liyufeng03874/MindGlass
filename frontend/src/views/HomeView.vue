@@ -117,7 +117,7 @@ watch([isRunning, () => graph.value?.meta?.run_started_at], ([running, startedAt
   }
 }, { immediate: false })
 
-const showGraph = ref(false)
+const showGraph = ref(true)
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
 const demoInput = ref('')
 const demoLoaded = ref(false)
@@ -198,7 +198,7 @@ function loadTestData(demoName: string = '1') {
 function clearDemo() {
   graph.value = { nodes: [], edges: [] }
   messages.value = []
-  showGraph.value = false
+  showGraph.value = true
   demoLoaded.value = false
   demoElapsedLocked.value = false
   totalElapsed.value = null
@@ -340,14 +340,12 @@ function clearDemo() {
   overflow: hidden;
 }
 
-/* 左翼聊天：半透明玻璃，星空隐约透出 */
+/* 左翼聊天：半透明玻璃，星空隐约透出（不加 backdrop-blur，以免抹平星点） */
 .left-panel {
   width: 50%;
   min-width: 640px;
   border-right: 1px solid var(--panel-border);
-  background: rgba(10, 14, 31, 0.55);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(10, 14, 31, 0.5);
   transition: width 0.3s ease;
 }
 

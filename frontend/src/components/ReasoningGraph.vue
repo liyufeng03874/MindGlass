@@ -14,8 +14,9 @@
     />
 
     <div v-else class="empty-state">
-      <div class="empty-icon">🧠</div>
-      <p>发送问题后，推理过程将在这里展示</p>
+      <div class="empty-icon">🪞</div>
+      <p class="empty-title">投一个问题，看思绪成形</p>
+      <p class="empty-sub">推理过程将如星河般在你眼前生长</p>
     </div>
 
     <!-- 编辑侧边面板 -->
@@ -448,6 +449,32 @@ watch(
   transform: translate(-50%, -50%);
   text-align: center;
   color: var(--text-dim);
+}
+
+.empty-icon {
+  font-size: 52px;
+  margin-bottom: 16px;
+  filter: drop-shadow(0 0 18px rgba(167, 139, 250, 0.45));
+  animation: emptyFloat 4s ease-in-out infinite;
+}
+
+.empty-title {
+  font-size: 19px;
+  color: var(--text);
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+  text-shadow: 0 0 24px rgba(167, 139, 250, 0.3);
+}
+
+.empty-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+@keyframes emptyFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
 }
 
 .empty-icon {
