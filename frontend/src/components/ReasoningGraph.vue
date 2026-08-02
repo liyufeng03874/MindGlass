@@ -438,7 +438,7 @@ watch(
 .flow-container {
   width: 100%;
   height: 100%;
-  background: #fafafa;
+  background: transparent; /* 水镜：全透，深空星野即水面 */
 }
 
 .empty-state {
@@ -447,7 +447,7 @@ watch(
   left: 50%;
   transform: translate(-50%, -50%);
   text-align: center;
-  color: #999;
+  color: var(--text-dim);
 }
 
 .empty-icon {

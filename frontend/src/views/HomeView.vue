@@ -1,8 +1,8 @@
 <template>
   <div class="mindglass">
     <header class="header">
-      <h1>🧠 MindGlass</h1>
-      <span class="subtitle">可观测多步推理 Agent</span>
+      <h1>🪞 思镜</h1>
+      <span class="subtitle">照见思考的镜子 · 可观测多步推理 Agent</span>
       <div class="status-bar">
         <span :class="['status-dot', { active: connected }]"></span>
         <span>{{ status || '就绪' }}</span>
@@ -62,12 +62,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, computed, onUnmounted } from 'vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ReasoningGraph from '../components/ReasoningGraph.vue'
 import { useAgentGraph } from '../composables/useAgentGraph'
+import { usePhase, derivePhase } from '../composables/usePhase'
 
 const { graph, status, connected, messages, isRunning, sendMessage, retryFrom } = useAgentGraph()
+
+// ── 全局相位：从推理状态推导，驱动整站氛围层呼吸（水镜 v2.1 第一遍）──
+const { phase } = usePhase()
+const hasNodes = computed(() => (graph.value?.nodes?.length ?? 0) > 0)
+const derivedPhase = derivePhase(computed(() => isRunning.value), hasNodes)
+watch(derivedPhase, (v) => { phase.value = v }, { immediate: true })
 
 /** 总运行耗时（从 meta.run_started_at 计算） */
 const totalElapsed = ref<string | null>(null)
@@ -117,7 +124,7 @@ const demoLoaded = ref(false)
 const loadingDemo = ref(false)
 /** demo 加载时手动算过耗时，watch 不要覆盖 */
 const demoElapsedLocked = ref(false)
-const initialGreeting = '你好，我是 MindGlass 🧠\n\n我可以帮你拆解复杂问题、调用工具搜索、生成结构化回答。试试问我点什么吧～'
+const initialGreeting = '你好，我是思镜 🪞\n\n我是一面照见思考的镜子——把一个复杂问题拆成一步步推理，全过程摊开在你眼前。投一个问题进来，看思绪如何成形吧～'
 
 function onSend(query: string) {
   sendMessage(query)
@@ -200,41 +207,37 @@ function clearDemo() {
 </script>
 
 <style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #f5f7fa;
-  color: #333;
-}
-
+/* 思镜 · 首页暗色玻璃主题（水镜 v2.1 第一遍）
+   面板为半透明玻璃，右侧镜台全透——深空星野即水面 */
 .mindglass {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  color: var(--text);
 }
 
 .header {
-  background: #fff;
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   padding: 12px 24px;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid var(--panel-border);
   display: flex;
   align-items: center;
   gap: 16px;
+  position: relative;
+  z-index: 2;
 }
 
 .header h1 {
   font-size: 20px;
-  color: #1a1a2e;
+  color: var(--text-h);
+  letter-spacing: 1px;
 }
 
 .subtitle {
   font-size: 13px;
-  color: #888;
+  color: var(--text-dim);
 }
 
 .status-bar {
@@ -243,85 +246,86 @@ body {
   align-items: center;
   gap: 12px;
   font-size: 13px;
-  color: #666;
+  color: var(--text);
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ccc;
+  background: #3a3a4a;
 }
 
 .status-dot.active {
-  background: #52c41a;
+  background: var(--phase-tool);
+  box-shadow: 0 0 8px var(--phase-tool);
   animation: pulse 1.5s infinite;
 }
 
 .demo-input {
   padding: 4px 8px;
-  background: #fff;
-  border: 1px solid #d9d9d9;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
   font-size: 13px;
-  color: #333;
+  color: var(--text-h);
   width: 90px;
   outline: none;
   transition: border-color 0.2s;
 }
 
 .demo-input:focus {
-  border-color: #52c41a;
+  border-color: var(--accent);
 }
 
 .toggle-graph-btn {
   padding: 4px 12px;
-  background: #f0f0f0;
-  border: 1px solid #d9d9d9;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  color: #555;
+  color: var(--text);
   transition: all 0.2s;
 }
 
 .toggle-graph-btn:hover {
-  background: #e8e8e8;
-  color: #333;
+  background: rgba(167, 139, 250, 0.15);
+  color: var(--text-h);
+  border-color: var(--accent);
 }
 
 .clear-btn {
   padding: 4px 12px;
-  background: #ff4d4f;
-  border: 1px solid #ff4d4f;
+  background: rgba(255, 77, 79, 0.15);
+  border: 1px solid rgba(255, 77, 79, 0.4);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  color: #fff;
+  color: #ff7875;
   transition: all 0.2s;
 }
 
 .clear-btn:hover {
-  background: #ff7875;
-  border-color: #ff7875;
+  background: rgba(255, 77, 79, 0.28);
 }
 
 /* Admin 入口链接 */
 .admin-link {
   padding: 4px 12px;
-  background: #f0f0f0;
-  border: 1px solid #d9d9d9;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
   font-size: 13px;
-  color: #555;
+  color: var(--text);
   text-decoration: none;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .admin-link:hover {
-  background: #e8e8e8;
-  color: #333;
+  background: rgba(167, 139, 250, 0.15);
+  color: var(--text-h);
 }
 
 @keyframes pulse {
@@ -336,11 +340,14 @@ body {
   overflow: hidden;
 }
 
+/* 左翼聊天：半透明玻璃，星空隐约透出 */
 .left-panel {
   width: 50%;
   min-width: 640px;
-  border-right: 1px solid #e8e8e8;
-  background: #fff;
+  border-right: 1px solid var(--panel-border);
+  background: rgba(10, 14, 31, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   transition: width 0.3s ease;
 }
 
@@ -349,9 +356,10 @@ body {
   border-right: none;
 }
 
+/* 右侧镜台：全透，深空星野即水面，推理图浮于其上 */
 .right-panel {
   flex: 1;
-  background: #fafafa;
+  background: transparent;
   position: relative;
 }
 

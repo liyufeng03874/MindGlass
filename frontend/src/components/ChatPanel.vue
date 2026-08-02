@@ -3,7 +3,7 @@
     <div class="messages" ref="messagesRef">
       <!-- 开场白 -->
       <div v-if="messages.length === 0 && initialGreeting" class="message agent greeting">
-        <div class="avatar">🧠</div>
+        <div class="avatar">🪞</div>
         <div class="bubble greeting-bubble">{{ initialGreeting }}</div>
       </div>
 
@@ -149,15 +149,18 @@ function handleSend() {
 }
 
 .message.user .bubble {
-  background: #1677ff;
+  background: linear-gradient(135deg, #a78bfa 0%, #8b6ff0 100%);
   color: #fff;
   border-bottom-right-radius: 4px;
+  box-shadow: 0 2px 12px rgba(167, 139, 250, 0.25);
 }
 
 .message.agent .bubble {
-  background: #f0f0f0;
-  color: #333;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-h);
+  border: 1px solid var(--panel-border);
   border-bottom-left-radius: 4px;
+  backdrop-filter: blur(8px);
 }
 
 /* Agent 消息的 Markdown 样式 */
@@ -190,29 +193,30 @@ function handleSend() {
 }
 .message.agent .bubble :deep(th),
 .message.agent .bubble :deep(td) {
-  border: 1px solid #d9d9d9;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 6px 10px;
   text-align: left;
 }
 .message.agent .bubble :deep(th) {
-  background: #e8e8e8;
+  background: rgba(255, 255, 255, 0.08);
   font-weight: 600;
 }
 .message.agent .bubble :deep(tr:nth-child(even)) {
-  background: rgba(0,0,0,0.02);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .message.agent .bubble :deep(blockquote) {
-  border-left: 3px solid #1677ff;
+  border-left: 3px solid var(--accent);
   margin: 0.5em 0;
   padding: 0.3em 0.8em;
-  color: #555;
-  background: rgba(22,119,255,0.04);
+  color: var(--text);
+  background: rgba(167, 139, 250, 0.06);
   border-radius: 0 4px 4px 0;
 }
 
 .message.agent .bubble :deep(code) {
-  background: rgba(0,0,0,0.06);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-h);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.9em;
@@ -244,12 +248,12 @@ function handleSend() {
 
 .message.agent .bubble :deep(hr) {
   border: none;
-  border-top: 1px solid #d9d9d9;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
   margin: 0.8em 0;
 }
 
 .message.agent .bubble :deep(a) {
-  color: #1677ff;
+  color: var(--accent);
   text-decoration: none;
 }
 .message.agent .bubble :deep(a:hover) {
@@ -257,18 +261,18 @@ function handleSend() {
 }
 
 .elapsed-badge {
-  background: #f5f5f5;
-  color: #888;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
   font-size: 12px;
   font-family: 'Menlo', 'Monaco', monospace;
   font-weight: 600;
   padding: 6px 12px;
   border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--panel-border);
 }
 
 .thinking {
-  color: #999;
+  color: var(--text-dim);
   font-style: italic;
 }
 
@@ -279,7 +283,7 @@ function handleSend() {
 
 @keyframes answerHighlight {
   0% {
-    background: #f0f0f0;
+    background: rgba(255, 255, 255, 0.06);
     transform: scale(1);
     box-shadow: none;
   }
@@ -290,11 +294,11 @@ function handleSend() {
     transform: scale(1);
   }
   10%, 20%, 30%, 40%, 50% {
-    background: #e3f2fd;
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.3), 0 0 20px rgba(25, 118, 210, 0.15);
+    background: rgba(167, 139, 250, 0.18);
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.35), 0 0 24px rgba(167, 139, 250, 0.25);
   }
   100% {
-    background: #f0f0f0;
+    background: rgba(255, 255, 255, 0.06);
     transform: scale(1);
     box-shadow: none;
   }
@@ -317,7 +321,7 @@ function handleSend() {
 
 .input-area {
   padding: 12px 16px;
-  border-top: 1px solid #e8e8e8;
+  border-top: 1px solid var(--panel-border);
   display: flex;
   gap: 8px;
 }
@@ -325,28 +329,38 @@ function handleSend() {
 .input {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid #d9d9d9;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
   border-radius: 8px;
   font-size: 14px;
+  color: var(--text-h);
   outline: none;
+  transition: border-color 0.2s;
+}
+
+.input::placeholder {
+  color: var(--text-dim);
 }
 
 .input:focus {
-  border-color: #1677ff;
+  border-color: var(--accent);
 }
 
 .send-btn {
   padding: 8px 16px;
-  background: #1677ff;
+  background: linear-gradient(135deg, #a78bfa 0%, #8b6ff0 100%);
   color: #fff;
   border: none;
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
+  box-shadow: 0 2px 12px rgba(167, 139, 250, 0.3);
 }
 
 .send-btn:disabled {
-  background: #d9d9d9;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  box-shadow: none;
   cursor: not-allowed;
 }
 </style>
