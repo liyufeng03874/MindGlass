@@ -39,7 +39,7 @@
                 </span>
                 <!-- ToolCall 展开/收起按钮 -->
                 <button
-                  v-if="blockGroup.single.type === 'toolcall' && (blockGroup.single.metadata?.resultPreview ?? '') !== ''"
+                  v-if="blockGroup.single.type === 'toolcall' && getToolRawText(blockGroup.single) !== ''"
                   class="expand-btn"
                   @click="toggleExpand(blockGroup.single.id)"
                 >
@@ -157,10 +157,11 @@
                       <span class="placeholder">无结果</span>
                     </template>
                   </template>
-                  <!-- 解析失败：回退原文 -->
+                  <!-- 解析失败/未完成：回退原文 -->
                   <template v-else>
-                    <pre class="tool-result" v-if="(blockGroup.single.metadata?.resultFull ?? blockGroup.single.metadata?.resultPreview ?? '') !== ''">{{ (blockGroup.single.metadata?.resultFull ?? blockGroup.single.metadata?.resultPreview ?? '') }}</pre>
-                    <span v-else class="placeholder">无结果</span>
+                    <pre class="tool-result" v-if="getToolRawText(blockGroup.single) !== ''">{{ getToolRawText(blockGroup.single) }}</pre>
+                    <span v-else-if="blockGroup.single.status === 'done'" class="placeholder">无结果</span>
+                    <span v-else class="placeholder">等待结果...</span>
                   </template>
                   <!-- 查看原文按钮（仅当有人读视图时显示） -->
                   <button v-if="parsedToolResult(blockGroup.single)" class="toggle-raw-btn" @click="toggleRaw(blockGroup.single.id)">
@@ -188,7 +189,7 @@
                       <span v-if="block.status === 'loading'" class="pulse-dot" />
                     </span>
                     <button
-                      v-if="(block.metadata?.resultPreview ?? '') !== ''"
+                      v-if="getToolRawText(block) !== ''"
                       class="expand-btn"
                       @click="toggleExpand(block.id)"
                     >
@@ -227,9 +228,11 @@
                         <span class="placeholder">无结果</span>
                       </template>
                     </template>
+                    <!-- 解析失败/未完成：回退原文 -->
                     <template v-else>
-                      <pre class="tool-result" v-if="(block.metadata?.resultFull ?? block.metadata?.resultPreview ?? '') !== ''">{{ (block.metadata?.resultFull ?? block.metadata?.resultPreview ?? '') }}</pre>
-                      <span v-else class="placeholder">无结果</span>
+                      <pre class="tool-result" v-if="getToolRawText(block) !== ''">{{ getToolRawText(block) }}</pre>
+                      <span v-else-if="block.status === 'done'" class="placeholder">无结果</span>
+                      <span v-else class="placeholder">等待结果...</span>
                     </template>
                     <button v-if="parsedToolResult(block)" class="toggle-raw-btn" @click="toggleRaw(block.id)">
                       {{ showRaw[block.id] ? '收起原文' : '查看原文' }}
@@ -487,6 +490,13 @@ function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
   return null
 }
 
+// ── 工具结果原始文本（用于回退展示，优先 resultFull，回退 resultPreview）──
+function getToolRawText(block: LeftBlock): string {
+  const full = block.metadata?.resultFull || ''
+  const preview = block.metadata?.resultPreview || ''
+  return full || preview || ''
+}
+
 // ── 工具结果 JSON 格式化（用于查看原文）──
 function formattedToolJson(block: LeftBlock): string | null {
   const raw = block.metadata?.resultFull || block.metadata?.resultPreview || ''
@@ -630,7 +640,13 @@ interface BlockGroup {
 }
 
 const blockGroups = computed<BlockGroup[]>(() => {
-  const blocks = props.leftBlocks || []
+  const allBlocks = props.leftBlocks || []
+  const hasAgentMessage = props.messages.some(m => m.role === 'agent')
+  // 若已有 agent 消息气泡，过滤掉 answer block 避免重复渲染
+  // answer 最终由 agent message bubble 展示
+  const blocks = hasAgentMessage
+    ? allBlocks.filter(b => b.type !== 'answer')
+    : allBlocks
   const groups: BlockGroup[] = []
   let i = 0
   while (i < blocks.length) {
