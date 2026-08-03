@@ -42,11 +42,7 @@
 
     <main class="main-content">
       <div :class="['left-panel', { full: !showGraph }]">
-        <!-- 空态：显示水镜 -->
-        <WaterMirrorEmpty v-if="graph.nodes.length === 0 && !isRunning" />
-        <!-- 有内容或运行中：显示聊天 -->
         <ChatPanel
-          v-else
           ref="chatPanelRef"
           :messages="messages"
           :disabled="isRunning"
@@ -70,7 +66,6 @@ import { ref, watch, computed, onUnmounted } from 'vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ReasoningGraph from '../components/ReasoningGraph.vue'
 import MirrorIcon from '../components/MirrorIcon.vue'
-import WaterMirrorEmpty from '../components/WaterMirrorEmpty.vue'
 import { useAgentGraph } from '../composables/useAgentGraph'
 import { usePhase, derivePhase } from '../composables/usePhase'
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-panel">
+  <div class="chat-panel" :style="{ '--phase-border': phaseBorderColor }">
     <div class="messages" ref="messagesRef">
       <!-- 开场白 -->
       <div v-if="messages.length === 0 && initialGreeting" class="message agent greeting">
@@ -41,6 +41,7 @@
 import { ref, watch, nextTick, computed } from 'vue'
 import MarkdownIt from 'markdown-it'
 import MirrorIcon from './MirrorIcon.vue'
+import { usePhase, phaseColor } from '../composables/usePhase'
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
@@ -72,6 +73,10 @@ const inputValue = ref('')
 const highlightIndex = ref<number | null>(null)
 const messagesRef = ref<HTMLElement | null>(null)
 const loading = computed(() => props.disabled)
+
+// 水镜：左侧跟随右侧相位呼吸
+const { phase } = usePhase()
+const phaseBorderColor = computed(() => phaseColor(phase.value))
 
 /** 将总用时追加到最后一条 agent 消息末尾 */
 const displayMessages = computed(() => {
@@ -125,6 +130,10 @@ function handleSend() {
   height: 100%;
   display: flex;
   flex-direction: column;
+  /* 水镜：左侧边框跟随右侧相位呼吸 */
+  border-right: 2px solid var(--phase-border, var(--panel-border));
+  transition: border-color 0.8s ease;
+  box-shadow: inset -1px 0 8px rgba(167, 139, 250, 0.05);
 }
 
 .messages {
