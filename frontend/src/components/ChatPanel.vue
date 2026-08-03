@@ -56,9 +56,9 @@
                 <!-- plan/observe/answer → markdown 渲染；plan/observe 完成后若是 JSON 则格式化展示 -->
                 <template v-if="blockGroup.single.type === 'plan' || blockGroup.single.type === 'observe' || blockGroup.single.type === 'answer'">
                   <pre
-                    v-if="blockGroup.single.type !== 'answer' && formattedJson(blockGroup.single.content, blockGroup.single.status)"
+                    v-if="blockGroup.single.type !== 'answer' && formattedJson(blockGroup.single.content)"
                     class="json-body"
-                  >{{ formattedJson(blockGroup.single.content, blockGroup.single.status) }}</pre>
+                  >{{ formattedJson(blockGroup.single.content) }}</pre>
                   <div v-else-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
                   <span v-else class="placeholder">等待内容...</span>
                 </template>
@@ -254,10 +254,9 @@ function handleSend() {
   inputValue.value = ''
 }
 
-// ── JSON 格式化展示（流式结束后把 plan/observe 的 JSON 内容美化显示）──
-function formattedJson(content: string, status: string): string | null {
-  // 只有完成态才格式化；流式中保持原文显示
-  if (status !== 'done' || !content) return null
+// ── JSON 格式化展示（plan/observe 内容能解析成 JSON 就美化展示）──
+function formattedJson(content: string): string | null {
+  if (!content) return null
   let src = content.trim()
   // 去 markdown 代码围栏
   if (src.startsWith('```')) {
@@ -272,7 +271,7 @@ function formattedJson(content: string, status: string): string | null {
   try {
     return JSON.stringify(JSON.parse(src.slice(start, end + 1)), null, 2)
   } catch {
-    return null
+    return null  // 流式中 JSON 未完成时解析失败，保持原文显示
   }
 }
 
@@ -413,11 +412,17 @@ const displayItems = computed<DisplayItem[]>(() => {
 
 .messages {
   flex: 1;
+  min-height: 0;  /* 关键：flex 子项才能被压缩到小于内容高度，overflow 才能生效 */
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 关键：直接子元素永不压缩——内容超出时由容器滚动，而不是挤压板块 */
+.messages > * {
+  flex-shrink: 0;
 }
 
 .message {
@@ -631,6 +636,8 @@ const displayItems = computed<DisplayItem[]>(() => {
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   overflow: hidden;
+  display: flex;           /* 内部纵向排布 */
+  flex-direction: column;
 }
 
 /* 不同类型左边框颜色区分 */
