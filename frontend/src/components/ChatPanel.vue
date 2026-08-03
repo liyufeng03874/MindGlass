@@ -139,8 +139,9 @@
                     <template v-if="parsedToolResult(blockGroup.single)?.type === 'search_ok'">
                       <div class="tool-results-readable">
                         <div v-for="(r, ri) in parsedToolResult(blockGroup.single)?.items" :key="ri" class="result-item" :class="{ 'item-hidden': !expandedBlocks[blockGroup.single.id] && ri >= 3 }">
-                          <a :href="r.url" target="_blank" rel="noopener noreferrer" class="result-title">{{ r.title }}</a>
-                          <span class="result-domain">{{ extractDomain(r.url) }}</span>
+                          <a v-if="r.url" :href="r.url" target="_blank" rel="noopener noreferrer" class="result-title">{{ r.title }}</a>
+                          <span v-else class="result-title">{{ r.title }}</span>
+                          <span v-if="r.url" class="result-domain">{{ extractDomain(r.url) }}</span>
                           <p class="result-snippet">{{ r.snippet }}</p>
                         </div>
                       </div>
@@ -212,8 +213,9 @@
                       <template v-if="parsedToolResult(block)?.type === 'search_ok'">
                         <div class="tool-results-readable">
                           <div v-for="(r, ri) in parsedToolResult(block)?.items" :key="ri" class="result-item" :class="{ 'item-hidden': !expandedBlocks[block.id] && ri >= 3 }">
-                            <a :href="r.url" target="_blank" rel="noopener noreferrer" class="result-title">{{ r.title }}</a>
-                            <span class="result-domain">{{ extractDomain(r.url) }}</span>
+                            <a v-if="r.url" :href="r.url" target="_blank" rel="noopener noreferrer" class="result-title">{{ r.title }}</a>
+                            <span v-else class="result-title">{{ r.title }}</span>
+                            <span v-if="r.url" class="result-domain">{{ extractDomain(r.url) }}</span>
                             <p class="result-snippet">{{ r.snippet }}</p>
                           </div>
                         </div>
@@ -464,30 +466,33 @@ function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
     return null
   }
 
-  // 错误情况
-  if (obj.error) {
-    return { type: 'error', message: obj.error }
+  // 解包 execute_tool 的外层包装 {tool, params, result}——工具真实返回值在 result 里
+  const inner =
+    obj && typeof obj === 'object' && !Array.isArray(obj) &&
+    obj.result && typeof obj.result === 'object' && !Array.isArray(obj.result)
+      ? obj.result
+      : obj
+
+  // 错误情况（外层 error 或内层 error）
+  if (obj.error || inner.error) {
+    return { type: 'error', message: inner.error || obj.error }
   }
 
-  // 搜索结果
-  if (Array.isArray(obj.results)) {
-    if (obj.results.length === 0) {
-      return { type: 'empty' }
-    }
-    const items = obj.results
-      .filter((r: any) => r && (r.title || r.url))
-      .map((r: any) => ({
-        title: r.title || r.url || '无标题',
-        url: r.url || '#',
-        snippet: r.snippet || r.content || '',
-      }))
-    if (items.length === 0) {
-      return { type: 'empty' }
-    }
-    return { type: 'search_ok', items }
-  }
-
-  return null
+  // 结果数组：search → results；rag_retrieve → passages
+  const arr = Array.isArray(inner.results)
+    ? inner.results
+    : Array.isArray(inner.passages) ? inner.passages : null
+  if (!arr) return null
+  if (arr.length === 0) return { type: 'empty' }
+  const items = arr
+    .filter((r: any) => r && (r.title || r.url || r.snippet || r.content || r.text))
+    .map((r: any) => ({
+      title: r.title || r.name || r.source || '无标题',
+      url: r.url || '',
+      snippet: r.snippet || r.content || r.text || '',
+    }))
+  if (items.length === 0) return { type: 'empty' }
+  return { type: 'search_ok', items }
 }
 
 // ── 工具结果原始文本（用于回退展示，优先 resultFull，回退 resultPreview）──
