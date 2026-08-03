@@ -142,7 +142,12 @@ function onRetry(stepIndex: number, originalNode: any, editedData: Record<string
 
 function onFocusAnswer() {
   if (chatPanelRef.value) {
-    chatPanelRef.value.highlightLastMessage()
+    // 任务⑦ T2：优先用新的 answer block 聚焦函数
+    if (chatPanelRef.value.highlightLastAnswerBlock) {
+      chatPanelRef.value.highlightLastAnswerBlock()
+    } else {
+      chatPanelRef.value.highlightLastMessage()
+    }
   }
 }
 

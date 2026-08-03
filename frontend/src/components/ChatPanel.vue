@@ -28,6 +28,7 @@
             <!-- 单列 block（plan/observe/answer 或孤立 toolcall） -->
             <div
               v-if="blockGroup.single"
+              :data-block-id="blockGroup.single.id"
               :class="['thought-block', `thought-${blockGroup.single.type}`]"
             >
               <!-- 标题行 -->
@@ -126,14 +127,46 @@
                     <span v-else class="placeholder">等待内容...</span>
                   </template>
                 </template>
-                <!-- toolcall → 结果预览 -->
+                <!-- toolcall → 人读视图（搜索结果列表）+ 查看原文 -->
                 <template v-if="blockGroup.single.type === 'toolcall'">
                   <div class="tool-params" v-if="blockGroup.single.metadata?.params">
                     <span class="tool-param-label">参数：</span>
                     <code>{{ summarizeParams(blockGroup.single.metadata.params) }}</code>
                   </div>
-                  <pre class="tool-result" v-if="(blockGroup.single.metadata?.resultPreview ?? '') !== ''">{{ (blockGroup.single.metadata?.resultPreview ?? '') }}</pre>
-                  <span v-else class="placeholder">无结果</span>
+                  <!-- 人读视图：解析 resultFull（回退 resultPreview） -->
+                  <template v-if="parsedToolResult(blockGroup.single)">
+                    <!-- 搜索结果列表 -->
+                    <template v-if="parsedToolResult(blockGroup.single)?.type === 'search_ok'">
+                      <div class="tool-results-readable">
+                        <div v-for="(r, ri) in parsedToolResult(blockGroup.single)?.items" :key="ri" class="result-item" :class="{ 'item-hidden': !expandedBlocks[blockGroup.single.id] && ri >= 3 }">
+                          <a :href="r.url" target="_blank" rel="noopener noreferrer" class="result-title">{{ r.title }}</a>
+                          <span class="result-domain">{{ extractDomain(r.url) }}</span>
+                          <p class="result-snippet">{{ r.snippet }}</p>
+                        </div>
+                      </div>
+                      <button v-if="(parsedToolResult(blockGroup.single)?.items?.length ?? 0) > 3" class="expand-all-btn" @click="toggleExpand(blockGroup.single.id)">
+                        {{ expandedBlocks[blockGroup.single.id] ? '收起' : `展开全部 ${parsedToolResult(blockGroup.single)?.items?.length} 条` }}
+                      </button>
+                    </template>
+                    <!-- 工具返回了 error -->
+                    <template v-else-if="parsedToolResult(blockGroup.single)?.type === 'error'">
+                      <div class="tool-error-msg">⚠️ {{ parsedToolResult(blockGroup.single)?.message || '工具返回错误' }}</div>
+                    </template>
+                    <!-- 结果为空 -->
+                    <template v-else>
+                      <span class="placeholder">无结果</span>
+                    </template>
+                  </template>
+                  <!-- 解析失败：回退原文 -->
+                  <template v-else>
+                    <pre class="tool-result" v-if="(blockGroup.single.metadata?.resultFull ?? blockGroup.single.metadata?.resultPreview ?? '') !== ''">{{ (blockGroup.single.metadata?.resultFull ?? blockGroup.single.metadata?.resultPreview ?? '') }}</pre>
+                    <span v-else class="placeholder">无结果</span>
+                  </template>
+                  <!-- 查看原文按钮（仅当有人读视图时显示） -->
+                  <button v-if="parsedToolResult(blockGroup.single)" class="toggle-raw-btn" @click="toggleRaw(blockGroup.single.id)">
+                    {{ showRaw[blockGroup.single.id] ? '收起原文' : '查看原文' }}
+                  </button>
+                  <pre v-if="showRaw[blockGroup.single.id] && formattedToolJson(blockGroup.single)" class="json-body">{{ formattedToolJson(blockGroup.single) }}</pre>
                 </template>
               </div>
             </div>
@@ -173,8 +206,35 @@
                       <span class="tool-param-label">参数：</span>
                       <code>{{ summarizeParams(block.metadata.params) }}</code>
                     </div>
-                    <pre class="tool-result" v-if="(block.metadata?.resultPreview ?? '') !== ''">{{ (block.metadata?.resultPreview ?? '') }}</pre>
-                    <span v-else class="placeholder">无结果</span>
+                    <!-- 人读视图：解析 resultFull（回退 resultPreview） -->
+                    <template v-if="parsedToolResult(block)">
+                      <template v-if="parsedToolResult(block)?.type === 'search_ok'">
+                        <div class="tool-results-readable">
+                          <div v-for="(r, ri) in parsedToolResult(block)?.items" :key="ri" class="result-item" :class="{ 'item-hidden': !expandedBlocks[block.id] && ri >= 3 }">
+                            <a :href="r.url" target="_blank" rel="noopener noreferrer" class="result-title">{{ r.title }}</a>
+                            <span class="result-domain">{{ extractDomain(r.url) }}</span>
+                            <p class="result-snippet">{{ r.snippet }}</p>
+                          </div>
+                        </div>
+                        <button v-if="(parsedToolResult(block)?.items?.length ?? 0) > 3" class="expand-all-btn" @click="toggleExpand(block.id)">
+                          {{ expandedBlocks[block.id] ? '收起' : `展开全部 ${parsedToolResult(block)?.items?.length} 条` }}
+                        </button>
+                      </template>
+                      <template v-else-if="parsedToolResult(block)?.type === 'error'">
+                        <div class="tool-error-msg">⚠️ {{ parsedToolResult(block)?.message || '工具返回错误' }}</div>
+                      </template>
+                      <template v-else>
+                        <span class="placeholder">无结果</span>
+                      </template>
+                    </template>
+                    <template v-else>
+                      <pre class="tool-result" v-if="(block.metadata?.resultFull ?? block.metadata?.resultPreview ?? '') !== ''">{{ (block.metadata?.resultFull ?? block.metadata?.resultPreview ?? '') }}</pre>
+                      <span v-else class="placeholder">无结果</span>
+                    </template>
+                    <button v-if="parsedToolResult(block)" class="toggle-raw-btn" @click="toggleRaw(block.id)">
+                      {{ showRaw[block.id] ? '收起原文' : '查看原文' }}
+                    </button>
+                    <pre v-if="showRaw[block.id] && formattedToolJson(block)" class="json-body">{{ formattedToolJson(block) }}</pre>
                   </div>
                 </div>
               </div>
@@ -309,7 +369,46 @@ function highlightLastMessage() {
   }
 }
 
-defineExpose({ highlightLastMessage })
+/**
+ * 任务⑦ T2：聚焦到左侧思考直播区最后一个 answer block，播放聚焦动画
+ * 与完成时的 answerHighlight 动画视觉一致，可重复触发
+ */
+function highlightLastAnswerBlock() {
+  // 找最后一个 type=answer 的 block
+  const blocks = props.leftBlocks || []
+  const lastAnswerIdx = [...blocks].reverse().findIndex(b => b.type === 'answer')
+  if (lastAnswerIdx < 0) {
+    // 兜底：没有 answer block 则用旧逻辑
+    highlightLastMessage()
+    return
+  }
+  // 正向 index
+  const answerIdx = blocks.length - 1 - lastAnswerIdx
+
+  // 滚动到最底（answer block 一般在底部）
+  if (messagesRef.value) {
+    messagesRef.value.scrollTo({
+      top: messagesRef.value.scrollHeight,
+      behavior: 'smooth',
+    })
+  }
+
+  // 对 answer block 播放聚焦动画：通过 CSS class 触发
+  // 使用 blockId 来标记动画
+  const blockId = blocks[answerIdx].id
+  // 用 DOM 查找该 block 元素
+  nextTick(() => {
+    const el = document.querySelector(`[data-block-id="${blockId}"] .thought-content`)
+    if (el) {
+      el.classList.add('answer-block-highlight')
+      setTimeout(() => {
+        el.classList.remove('answer-block-highlight')
+      }, 2000)
+    }
+  })
+}
+
+defineExpose({ highlightLastMessage, highlightLastAnswerBlock })
 
 function handleSend() {
   const query = inputValue.value.trim()
@@ -336,6 +435,76 @@ function formattedJson(content: string): string | null {
     return JSON.stringify(JSON.parse(src.slice(start, end + 1)), null, 2)
   } catch {
     return null  // 流式中 JSON 未完成时解析失败，保持原文显示
+  }
+}
+
+// ── 工具结果人读视图解析器（任务⑦：单列/并行组共用）
+interface ParsedToolResult {
+  type: 'search_ok' | 'error' | 'empty'
+  items?: Array<{ title: string; url: string; snippet: string }>
+  message?: string
+}
+
+function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
+  // 未完成状态不解析
+  if (block.status !== 'done') return null
+
+  // 优先 resultFull，回退 resultPreview
+  const raw = block.metadata?.resultFull || block.metadata?.resultPreview || ''
+  if (!raw) return null
+
+  // 解析 JSON
+  let obj: any
+  try {
+    obj = JSON.parse(raw)
+  } catch {
+    return null
+  }
+
+  // 错误情况
+  if (obj.error) {
+    return { type: 'error', message: obj.error }
+  }
+
+  // 搜索结果
+  if (Array.isArray(obj.results)) {
+    if (obj.results.length === 0) {
+      return { type: 'empty' }
+    }
+    const items = obj.results
+      .filter((r: any) => r && (r.title || r.url))
+      .map((r: any) => ({
+        title: r.title || r.url || '无标题',
+        url: r.url || '#',
+        snippet: r.snippet || r.content || '',
+      }))
+    if (items.length === 0) {
+      return { type: 'empty' }
+    }
+    return { type: 'search_ok', items }
+  }
+
+  return null
+}
+
+// ── 工具结果 JSON 格式化（用于查看原文）──
+function formattedToolJson(block: LeftBlock): string | null {
+  const raw = block.metadata?.resultFull || block.metadata?.resultPreview || ''
+  if (!raw) return null
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return null
+  }
+}
+
+// ── 提取域名 ──
+function extractDomain(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.hostname.replace(/^www\./, '')
+  } catch {
+    return ''
   }
 }
 
@@ -970,6 +1139,112 @@ const displayItems = computed<DisplayItem[]>(() => {
 /* 展开状态：不限高 */
 .thought-content:not(.is-collapsed) .tool-result {
   max-height: none;
+}
+
+/* 任务⑦ T2：answer block 聚焦动画（与 answerHighlight 视觉一致） */
+.answer-block-highlight {
+  animation: answerBlockHighlight 2s ease;
+}
+
+@keyframes answerBlockHighlight {
+  0% {
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: none;
+  }
+  15%, 50% {
+    background: rgba(167, 139, 250, 0.15);
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.3), 0 0 24px rgba(167, 139, 250, 0.2);
+  }
+  100% {
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: none;
+  }
+}
+
+/* ═══ 任务⑦：工具结果人读视图样式 ═══ */
+
+.tool-results-readable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.result-item {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 0.2s;
+}
+
+.result-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* 超过 3 条默认隐藏 */
+.result-item.item-hidden {
+  display: none;
+}
+
+.result-title {
+  display: inline-block;
+  color: #60a5fa;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-right: 8px;
+}
+
+.result-title:hover {
+  text-decoration: underline;
+  color: #93bbfc;
+}
+
+.result-domain {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.result-snippet {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+
+/* 展开全部按钮 */
+.expand-all-btn {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 4px 12px;
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 6px;
+  color: #a78bfa;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+
+.expand-all-btn:hover {
+  background: rgba(167, 139, 250, 0.2);
+  color: #c4b5fd;
+}
+
+/* 工具错误提示 */
+.tool-error-msg {
+  font-size: 13px;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+  line-height: 1.5;
 }
 
 /* JSON 格式化展示区（plan/observe 完成后）*/

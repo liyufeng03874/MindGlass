@@ -170,10 +170,12 @@ export function useAgentGraph() {
           const blockId = `block_${node.id}`
           let block = leftBlocks.value.find((b: LeftBlock) => b.id === blockId)
 
-          // 后端 node_complete 事件将 tool_name/params/result_preview 放在 event.data 顶层
+          // 后端 node_complete 事件将 tool_name/params/result_preview/result_full 放在 event.data 顶层
           const toolName = event.data.tool_name || node.data?.tool || ''
           const params = event.data.params || node.data?.params
           const resultPreview = event.data.result_preview || ''
+          // 任务⑦：完整结果 JSON 字符串——左侧人读视图直接用，避免 500 字符截断
+          const resultFull = event.data.result_full || ''
 
           if (!block) {
             block = {
@@ -187,6 +189,7 @@ export function useAgentGraph() {
                 toolName,
                 params,
                 resultPreview,
+                resultFull,
               },
               parallelGroupId: node.data?.parallel_group_id,
             }
@@ -197,6 +200,7 @@ export function useAgentGraph() {
               toolName,
               params,
               resultPreview,
+              resultFull,
             }
           }
         }

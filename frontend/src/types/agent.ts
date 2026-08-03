@@ -64,6 +64,7 @@ export interface LeftBlock {
     toolName?: string
     params?: Record<string, any>
     resultPreview?: string
+    resultFull?: string   // 任务⑦：完整结果 JSON 字符串
   }
   // 用于并行工具块分组
   parallelGroupId?: string
