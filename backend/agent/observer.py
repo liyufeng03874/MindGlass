@@ -9,7 +9,8 @@ Observe 节点的核心逻辑：
 """
 
 import json
-from agent.llm import generate
+import asyncio
+from agent.llm import generate, generate_stream
 
 OBSERVE_SYSTEM_PROMPT = """你是一个信息评估专家。你的任务是对搜索工具返回的原始结果进行结构化评估。
 
@@ -44,14 +45,18 @@ OBSERVE_SYSTEM_PROMPT = """你是一个信息评估专家。你的任务是对�
 注意：你只做评估，不做决策。不要建议"是否需要继续搜索"或"信息是否充足"——那是 Plan 节点的职责。"""
 
 
-async def observe(query: str, raw_results: list[dict], previous_outputs: list[dict] = None) -> dict:
+async def observe(query: str, raw_results: list[dict], previous_outputs: list[dict] = None,
+                  stream_emit=None, node_id: str = None, node_type: str = "Observe") -> dict:
     """
-    对工具返回的原始结果进行结构化评估。
+    对工具返回的原始结果进行结构化评估（支持流式）。
 
     参数：
         query: 用户原始问题（提供评估上下文）
         raw_results: 本轮 ToolCall 返回的原始结果列表
         previous_outputs: 之前轮次的 observe 输出（用于增量对比）
+        stream_emit: 可选回调 (chunk, content)，用于流式推送
+        node_id: 节点 ID（用于流式事件标识）
+        node_type: 节点类型（用于流式事件标识）
 
     返回：
         结构化评估对象（符合 OBSERVE_SYSTEM_PROMPT 定义的 schema）
@@ -88,7 +93,16 @@ async def observe(query: str, raw_results: list[dict], previous_outputs: list[di
 
     prompt = "\n".join(parts)
 
-    result = generate(prompt, system_prompt=OBSERVE_SYSTEM_PROMPT)
+    if stream_emit is None:
+        # 非流式路径：保持原有行为
+        result = generate(prompt, system_prompt=OBSERVE_SYSTEM_PROMPT)
+    else:
+        # 流式路径：边收 chunk 边 emit
+        messages = [
+            {"role": "system", "content": OBSERVE_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        result = await _run_llm_stream(messages, stream_emit, node_id, node_type)
 
     # 解析 JSON
     try:
@@ -110,3 +124,27 @@ async def observe(query: str, raw_results: list[dict], previous_outputs: list[di
             "new_info_vs_previous": "首轮检索" if round_num == 1 else "解析失败",
             "_raw_fallback": result[:500],
         }
+
+
+async def _run_llm_stream(messages: list, stream_emit, node_id: str, node_type: str) -> str:
+    """通用流式 LLM 调用：边收 chunk 边 emit，返回完整文本。
+    
+    stream_emit(chunk, content) 回调，content 为累计全文。
+    """
+    from agent.llm import LLM_MODEL
+    from agent.llm import client
+
+    full_text = ""
+    stream = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=messages,
+        temperature=0.3,
+        max_tokens=2048,
+        stream=True,
+    )
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            token = chunk.choices[0].delta.content
+            full_text += token
+            stream_emit(token, full_text)
+    return full_text

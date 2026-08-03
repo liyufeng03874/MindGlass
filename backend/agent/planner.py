@@ -9,7 +9,8 @@ Plan 节点的两种模式：
 """
 
 import json
-from agent.llm import generate
+import asyncio
+from agent.llm import generate, generate_stream
 
 # ── 首次规划 Prompt ──
 PLANNING_SYSTEM_PROMPT = """你是一个任务规划专家。给定用户的查询，你需要将其拆解为一系列可执行的步骤。
@@ -91,10 +92,21 @@ async def plan(query: str, observe_outputs: list[dict] = None, plan_count: int =
     return await _decide(query, observe_outputs, plan_count)
 
 
-async def _initial_plan(query: str) -> dict:
-    """首次规划：拆解用户 query 为工具步骤"""
+async def _initial_plan(query: str, stream_emit=None, node_id: str = None, node_type: str = "Plan") -> dict:
+    """首次规划：拆解用户 query 为工具步骤（支持流式）"""
     prompt = f"用户查询: {query}\n\n请拆解为可执行步骤："
-    result = generate(prompt, system_prompt=PLANNING_SYSTEM_PROMPT)
+
+    if stream_emit is None:
+        # 非流式路径：保持原有行为
+        result = generate(prompt, system_prompt=PLANNING_SYSTEM_PROMPT)
+    else:
+        # 流式路径：边收 chunk 边 emit
+        loop = asyncio.get_event_loop()
+        messages = [
+            {"role": "system", "content": PLANNING_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        result = await _run_llm_stream(messages, loop, stream_emit, node_id, node_type)
 
     try:
         cleaned = result.strip()
@@ -116,8 +128,9 @@ async def _initial_plan(query: str) -> dict:
         }
 
 
-async def _decide(query: str, observe_outputs: list[dict], plan_count: int) -> dict:
-    """决策判断：根据 Observe 输出判断信息充足性"""
+async def _decide(query: str, observe_outputs: list[dict], plan_count: int,
+                  stream_emit=None, node_id: str = None, node_type: str = "Plan") -> dict:
+    """决策判断：根据 Observe 输出判断信息充足性（支持流式）"""
     parts = [f"用户原始问题：{query}\n"]
     parts.append(f"当前是第 {plan_count} 轮规划（最多 3 轮）。\n")
     parts.append("=== 各轮检索评估报告 ===")
@@ -147,7 +160,18 @@ async def _decide(query: str, observe_outputs: list[dict], plan_count: int) -> d
     parts.append("\n请判断信息是否足以回答用户问题，按 JSON 格式输出决策。")
 
     prompt = "\n".join(parts)
-    result = generate(prompt, system_prompt=DECISION_SYSTEM_PROMPT)
+
+    if stream_emit is None:
+        # 非流式路径：保持原有行为
+        result = generate(prompt, system_prompt=DECISION_SYSTEM_PROMPT)
+    else:
+        # 流式路径：边收 chunk 边 emit
+        loop = asyncio.get_event_loop()
+        messages = [
+            {"role": "system", "content": DECISION_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        result = await _run_llm_stream(messages, loop, stream_emit, node_id, node_type)
 
     try:
         cleaned = result.strip()
@@ -183,3 +207,27 @@ async def _decide(query: str, observe_outputs: list[dict], plan_count: int) -> d
             "reasoning": "决策解析失败，基于已有信息生成回答",
             "plan_count": plan_count,
         }
+
+
+async def _run_llm_stream(messages: list, loop, stream_emit, node_id: str, node_type: str) -> str:
+    """通用流式 LLM 调用：边收 chunk 边 emit，返回完整文本。
+    
+    stream_emit(chunk, content) 回调，content 为累计全文。
+    """
+    from agent.llm import LLM_MODEL
+    from agent.llm import client
+
+    full_text = ""
+    stream = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=messages,
+        temperature=0.3,
+        max_tokens=2048,
+        stream=True,
+    )
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            token = chunk.choices[0].delta.content
+            full_text += token
+            stream_emit(token, full_text)
+    return full_text

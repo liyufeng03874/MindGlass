@@ -8,7 +8,8 @@
 """
 
 import json
-from agent.llm import generate
+import asyncio
+from agent.llm import generate, generate_stream
 
 ANSWER_SYSTEM_PROMPT = """你是一个专业的 AI 助手。根据用户的问题、各轮检索评估报告和收集到的结构化信息，给出准确、完整、有条理的回答。
 
@@ -32,15 +33,21 @@ async def generate_answer(
     observe_outputs: list[dict],
     plan_decision: dict = None,
     degraded: bool = False,
+    stream_emit=None,
+    node_id: str = None,
+    node_type: str = "Answer",
 ) -> str:
     """
-    基于 Observe 结构化评估报告生成最终回答。
+    基于 Observe 结构化评估报告生成最终回答（支持流式）。
 
     参数：
         query: 用户原始问题
         observe_outputs: Observe 结构化输出数组（每轮一个对象）
         plan_decision: Plan 节点的最终决策（含 reasoning、if_terminate 等）
         degraded: 是否为降级模式（强制终止，信息可能不完整）
+        stream_emit: 可选回调 (chunk, content)，用于流式推送
+        node_id: 节点 ID（用于流式事件标识）
+        node_type: 节点类型（用于流式事件标识）
     """
     # 构建上下文
     context_parts = []
@@ -82,7 +89,16 @@ async def generate_answer(
 
 请根据以上评估报告回答用户的问题："""
 
-    result = generate(prompt, system_prompt=ANSWER_SYSTEM_PROMPT)
+    if stream_emit is None:
+        # 非流式路径：保持原有行为
+        result = generate(prompt, system_prompt=ANSWER_SYSTEM_PROMPT)
+    else:
+        # 流式路径：边收 chunk 边 emit
+        messages = [
+            {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        result = await _run_llm_stream(messages, stream_emit, node_id, node_type)
 
     # 降级模式：在回答前加提示信息
     if degraded and plan_decision:
@@ -93,3 +109,27 @@ async def generate_answer(
         result = ANSWER_DEGRADED_PREFIX.format(note=note) + result
 
     return result
+
+
+async def _run_llm_stream(messages: list, stream_emit, node_id: str, node_type: str) -> str:
+    """通用流式 LLM 调用：边收 chunk 边 emit，返回完整文本。
+    
+    stream_emit(chunk, content) 回调，content 为累计全文。
+    """
+    from agent.llm import LLM_MODEL
+    from agent.llm import client
+
+    full_text = ""
+    stream = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=messages,
+        temperature=0.3,
+        max_tokens=2048,
+        stream=True,
+    )
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            token = chunk.choices[0].delta.content
+            full_text += token
+            stream_emit(token, full_text)
+    return full_text
