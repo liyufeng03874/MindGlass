@@ -163,18 +163,24 @@ export function useAgentGraph() {
           const blockType: LeftBlock['type'] = 'toolcall'
           const blockId = `block_${node.id}`
           let block = leftBlocks.value.find((b: LeftBlock) => b.id === blockId)
+
+          // 后端 node_complete 事件将 tool_name/params/result_preview 放在 event.data 顶层
+          const toolName = event.data.tool_name || node.data?.tool || ''
+          const params = event.data.params || node.data?.params
+          const resultPreview = event.data.result_preview || ''
+
           if (!block) {
             block = {
               id: blockId,
               nodeId: node.id,
               type: blockType,
               status: node.status === 'error' ? 'error' : 'done',
-              title: `🔧 调用工具: ${event.data.tool_name || node.data?.tool || '未知'}`,
+              title: `🔧 调用工具: ${toolName || '未知'}`,
               content: '',
               metadata: {
-                toolName: event.data.tool_name || node.data?.tool,
-                params: event.data.params || node.data?.params,
-                resultPreview: event.data.result_preview || '',
+                toolName,
+                params,
+                resultPreview,
               },
               parallelGroupId: node.data?.parallel_group_id,
             }
@@ -182,9 +188,9 @@ export function useAgentGraph() {
           } else {
             block.status = node.status === 'error' ? 'error' : 'done'
             block.metadata = {
-              toolName: event.data.tool_name || node.data?.tool,
-              params: event.data.params || node.data?.params,
-              resultPreview: event.data.result_preview || '',
+              toolName,
+              params,
+              resultPreview,
             }
           }
         }

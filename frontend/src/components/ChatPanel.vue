@@ -2,113 +2,119 @@
   <div class="chat-panel" :style="{ '--phase-border': phaseBorderColor }">
     <div class="messages" ref="messagesRef" @scroll="handleScroll">
       <!-- 开场白 -->
-      <div v-if="messages.length === 0 && initialGreeting && (!leftBlocks || leftBlocks.length === 0)" class="message agent greeting">
+      <div v-if="displayItems.length === 0 && initialGreeting" class="message agent greeting">
         <div class="avatar greeting-avatar"><MirrorIcon :size="26" /></div>
         <div class="bubble greeting-bubble">{{ initialGreeting }}</div>
       </div>
 
-      <!-- ═══ 思考直播区 ═══ -->
-      <!-- 将连续的 toolcall block 分组为并行组（同 parallelGroupId） -->
-      <template v-for="blockGroup in blockGroups" :key="blockGroup.groupId">
-        <!-- 单列 block（plan/observe/answer 或孤立 toolcall） -->
-        <div
-          v-if="blockGroup.single"
-          :class="['thought-block', `thought-${blockGroup.single.type}`]"
-        >
-          <!-- 标题行 -->
-          <div class="thought-header">
-            <span class="thought-title" :class="{ 'is-loading': blockGroup.single.status === 'loading' }">
-              {{ blockGroup.single.title }}
-              <span v-if="blockGroup.single.status === 'loading'" class="pulse-dot" />
-            </span>
-            <!-- ToolCall 展开/收起按钮 -->
-            <button
-              v-if="blockGroup.single.type === 'toolcall' && blockGroup.single.metadata?.resultPreview"
-              class="expand-btn"
-              @click="toggleExpand(blockGroup.single.id)"
-            >
-              {{ expandedBlocks[blockGroup.single.id] ? '收起' : '展开' }}
-            </button>
-          </div>
-          <!-- 内容区 -->
+      <!-- ═══ 统一渲染循环：用户问题 → 思考直播 blocks → 最终回答 ═══ -->
+      <template v-for="item in displayItems" :key="item.id">
+        <!-- 消息气泡（用户问题 / 最终回答） -->
+        <div v-if="item.kind === 'message'" :class="['message', item.role]">
+          <div class="avatar">{{ item.role === 'user' ? '👤' : '🤖' }}</div>
           <div
-            class="thought-content"
-            :class="{
-              'is-loading': blockGroup.single.status === 'loading',
-              'is-collapsed': blockGroup.single.type === 'toolcall' && !expandedBlocks[blockGroup.single.id]
-            }"
-          >
-            <!-- plan/observe/answer → markdown 渲染 -->
-            <template v-if="blockGroup.single.type === 'plan' || blockGroup.single.type === 'observe' || blockGroup.single.type === 'answer'">
-              <div v-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
-              <span v-else class="placeholder">等待内容...</span>
-            </template>
-            <!-- toolcall → 结果预览 -->
-            <template v-if="blockGroup.single.type === 'toolcall'">
-              <div class="tool-params" v-if="blockGroup.single.metadata?.params">
-                <span class="tool-param-label">参数：</span>
-                <code>{{ summarizeParams(blockGroup.single.metadata.params) }}</code>
-              </div>
-              <pre class="tool-result" v-if="blockGroup.single.metadata?.resultPreview">{{ blockGroup.single.metadata.resultPreview }}</pre>
-              <span v-else class="placeholder">无结果</span>
-            </template>
-          </div>
+            class="bubble"
+            v-if="item.role === 'agent'"
+            v-html="md.render(item.content ?? '')"
+            :class="{ highlighted: item._isLastAgent }"
+          ></div>
+          <div class="bubble" v-else>{{ item.content ?? '' }}</div>
         </div>
 
-        <!-- 并行工具组（两列 grid） -->
-        <div
-          v-else-if="(blockGroup.blocks?.length ?? 0) > 0"
-          class="thought-block thought-toolcall-parallel"
-        >
-          <div class="tool-parallel-grid">
+        <!-- 思考直播 blocks（仅在有数据时渲染，不留空白区） -->
+        <template v-if="item.kind === 'thought'">
+          <!-- 将连续的 toolcall block 分组为并行组（同 parallelGroupId） -->
+          <template v-for="blockGroup in blockGroups" :key="'bg-' + blockGroup.groupId">
+            <!-- 单列 block（plan/observe/answer 或孤立 toolcall） -->
             <div
-              v-for="block in blockGroup.blocks"
-              :key="block.id"
-              class="thought-block thought-toolcall parallel-card"
+              v-if="blockGroup.single"
+              :class="['thought-block', `thought-${blockGroup.single.type}`]"
             >
+              <!-- 标题行 -->
               <div class="thought-header">
-                <span class="thought-title" :class="{ 'is-loading': block.status === 'loading' }">
-                  {{ block.title }}
-                  <span v-if="block.status === 'loading'" class="pulse-dot" />
+                <span class="thought-title" :class="{ 'is-loading': blockGroup.single.status === 'loading' }">
+                  {{ blockGroup.single.title }}
+                  <span v-if="blockGroup.single.status === 'loading'" class="pulse-dot" />
                 </span>
+                <!-- ToolCall 展开/收起按钮 -->
                 <button
-                  v-if="block.metadata?.resultPreview"
+                  v-if="blockGroup.single.type === 'toolcall' && (blockGroup.single.metadata?.resultPreview ?? '') !== ''"
                   class="expand-btn"
-                  @click="toggleExpand(block.id)"
+                  @click="toggleExpand(blockGroup.single.id)"
                 >
-                  {{ expandedBlocks[block.id] ? '收起' : '展开' }}
+                  {{ expandedBlocks[blockGroup.single.id] ? '收起' : '展开' }}
                 </button>
               </div>
+              <!-- 内容区 -->
               <div
                 class="thought-content"
                 :class="{
-                  'is-loading': block.status === 'loading',
-                  'is-collapsed': !expandedBlocks[block.id]
+                  'is-loading': blockGroup.single.status === 'loading',
+                  'is-collapsed': blockGroup.single.type === 'toolcall' && !expandedBlocks[blockGroup.single.id]
                 }"
               >
-                <div class="tool-params" v-if="block.metadata?.params">
-                  <span class="tool-param-label">参数：</span>
-                  <code>{{ summarizeParams(block.metadata.params) }}</code>
-                </div>
-                <pre class="tool-result" v-if="block.metadata?.resultPreview">{{ block.metadata.resultPreview }}</pre>
-                <span v-else class="placeholder">无结果</span>
+                <!-- plan/observe/answer → markdown 渲染 -->
+                <template v-if="blockGroup.single.type === 'plan' || blockGroup.single.type === 'observe' || blockGroup.single.type === 'answer'">
+                  <div v-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
+                  <span v-else class="placeholder">等待内容...</span>
+                </template>
+                <!-- toolcall → 结果预览 -->
+                <template v-if="blockGroup.single.type === 'toolcall'">
+                  <div class="tool-params" v-if="blockGroup.single.metadata?.params">
+                    <span class="tool-param-label">参数：</span>
+                    <code>{{ summarizeParams(blockGroup.single.metadata.params) }}</code>
+                  </div>
+                  <pre class="tool-result" v-if="(blockGroup.single.metadata?.resultPreview ?? '') !== ''">{{ (blockGroup.single.metadata?.resultPreview ?? '') }}</pre>
+                  <span v-else class="placeholder">无结果</span>
+                </template>
               </div>
             </div>
-          </div>
-        </div>
+
+            <!-- 并行工具组（两列 grid） -->
+            <div
+              v-else-if="(blockGroup.blocks?.length ?? 0) > 0"
+              class="thought-block thought-toolcall-parallel"
+            >
+              <div class="tool-parallel-grid">
+                <div
+                  v-for="block in blockGroup.blocks"
+                  :key="'pb-' + block.id"
+                  class="thought-block thought-toolcall parallel-card"
+                >
+                  <div class="thought-header">
+                    <span class="thought-title" :class="{ 'is-loading': block.status === 'loading' }">
+                      {{ block.title }}
+                      <span v-if="block.status === 'loading'" class="pulse-dot" />
+                    </span>
+                    <button
+                      v-if="(block.metadata?.resultPreview ?? '') !== ''"
+                      class="expand-btn"
+                      @click="toggleExpand(block.id)"
+                    >
+                      {{ expandedBlocks[block.id] ? '收起' : '展开' }}
+                    </button>
+                  </div>
+                  <div
+                    class="thought-content"
+                    :class="{
+                      'is-loading': block.status === 'loading',
+                      'is-collapsed': !expandedBlocks[block.id]
+                    }"
+                  >
+                    <div class="tool-params" v-if="block.metadata?.params">
+                      <span class="tool-param-label">参数：</span>
+                      <code>{{ summarizeParams(block.metadata.params) }}</code>
+                    </div>
+                    <pre class="tool-result" v-if="(block.metadata?.resultPreview ?? '') !== ''">{{ (block.metadata?.resultPreview ?? '') }}</pre>
+                    <span v-else class="placeholder">无结果</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </template>
       </template>
 
-      <!-- 现有 messages（用户问题 + 最终回答） -->
-      <div
-        v-for="(msg, idx) in displayMessages"
-        :key="'msg-' + idx"
-        :data-msg-index="idx"
-        :class="['message', msg.role]"
-      >
-        <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
-        <div class="bubble" v-if="msg.role === 'agent'" v-html="md.render(msg.content)" :class="{ highlighted: idx === displayMessages.length - 1 && highlightIndex === displayMessages.length - 1 }"></div>
-        <div class="bubble" v-else>{{ msg.content }}</div>
-      </div>
       <div v-if="loading" class="message agent">
         <div class="avatar">🤖</div>
         <div class="bubble thinking">{{ statusText || '正在规划...' }}</div>
@@ -300,18 +306,70 @@ const blockGroups = computed<BlockGroup[]>(() => {
   return groups
 })
 
-/** 将总用时追加到最后一条 agent 消息末尾 */
-const displayMessages = computed(() => {
-  if (!props.messages.length || !props.totalElapsed) return props.messages
-  const lastAgent = [...props.messages].reverse().find(m => m.role === 'agent')
-  if (!lastAgent) return props.messages
-  const elapsedTag = `\n\n---\n\n*（本次推理耗时 ${props.totalElapsed}）*`
-  return props.messages.map((m, i) => {
-    if (m === lastAgent && i === props.messages.length - 1) {
-      return { ...m, content: m.content + elapsedTag }
+/** ═══ 统一渲染列表：用户问题 → 思考直播 blocks → 最终回答 ═══
+ *  保证一次 run 内顺序 = 用户气泡 → 思考 blocks → 最终回答气泡
+ *  demo 加载场景 leftBlocks 为空时不留空白区
+ */
+interface DisplayItem {
+  id: string
+  kind: 'message' | 'thought'
+  role?: 'user' | 'agent'
+  content?: string
+  _isLastAgent?: boolean
+}
+
+const displayItems = computed<DisplayItem[]>(() => {
+  const items: DisplayItem[] = []
+  const msgs = props.messages
+  const blocks = props.leftBlocks || []
+  const hasBlocks = blocks.length > 0
+
+  // 标记：思考 blocks 是否已渲染（一次 run 只渲染一次）
+  let thoughtRendered = false
+
+  for (let i = 0; i < msgs.length; i++) {
+    const msg = msgs[i]
+    let content = msg.content
+
+    // 将总用时追加到最后一条 agent 消息末尾
+    if (msg.role === 'agent' && props.totalElapsed) {
+      const lastAgentIdx = [...msgs].reverse().findIndex(m => m.role === 'agent')
+      if (i === msgs.length - 1 - lastAgentIdx) {
+        content += `\n\n---\n\n*（本次推理耗时 ${props.totalElapsed}）*`
+      }
     }
-    return m
-  })
+
+    items.push({
+      id: `msg-${i}`,
+      kind: 'message',
+      role: msg.role,
+      content,
+    })
+
+    // 在用户消息之后插入思考 blocks（仅一次）
+    if (msg.role === 'user' && hasBlocks && !thoughtRendered) {
+      items.push({
+        id: 'thought-blocks',
+        kind: 'thought',
+      })
+      thoughtRendered = true
+    }
+  }
+
+  // 边界：没有 messages 但有 leftBlocks（极少见，兜底渲染）
+  if (!thoughtRendered && hasBlocks) {
+    items.push({ id: 'thought-blocks', kind: 'thought' })
+  }
+
+  // 标记最后一条 agent 消息用于高亮
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].role === 'agent') {
+      items[i]._isLastAgent = true
+      break
+    }
+  }
+
+  return items
 })
 </script>
 
