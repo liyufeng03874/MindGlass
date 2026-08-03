@@ -2,7 +2,7 @@
   <div class="chat-panel" :style="{ '--phase-border': phaseBorderColor }">
     <div class="messages" ref="messagesRef" @scroll="handleScroll">
       <!-- 开场白 -->
-      <div v-if="displayItems.length === 0 && initialGreeting" class="message agent greeting">
+      <div v-if="(displayItems?.length ?? 0) === 0 && initialGreeting" class="message agent greeting">
         <div class="avatar greeting-avatar"><MirrorIcon :size="26" /></div>
         <div class="bubble greeting-bubble">{{ initialGreeting }}</div>
       </div>
@@ -53,9 +53,13 @@
                   'is-collapsed': blockGroup.single.type === 'toolcall' && !expandedBlocks[blockGroup.single.id]
                 }"
               >
-                <!-- plan/observe/answer → markdown 渲染 -->
+                <!-- plan/observe/answer → markdown 渲染；plan/observe 完成后若是 JSON 则格式化展示 -->
                 <template v-if="blockGroup.single.type === 'plan' || blockGroup.single.type === 'observe' || blockGroup.single.type === 'answer'">
-                  <div v-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
+                  <pre
+                    v-if="blockGroup.single.type !== 'answer' && formattedJson(blockGroup.single.content, blockGroup.single.status)"
+                    class="json-body"
+                  >{{ formattedJson(blockGroup.single.content, blockGroup.single.status) }}</pre>
+                  <div v-else-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
                   <span v-else class="placeholder">等待内容...</span>
                 </template>
                 <!-- toolcall → 结果预览 -->
@@ -248,6 +252,28 @@ function handleSend() {
   if (!query) return
   emit('send', query)
   inputValue.value = ''
+}
+
+// ── JSON 格式化展示（流式结束后把 plan/observe 的 JSON 内容美化显示）──
+function formattedJson(content: string, status: string): string | null {
+  // 只有完成态才格式化；流式中保持原文显示
+  if (status !== 'done' || !content) return null
+  let src = content.trim()
+  // 去 markdown 代码围栏
+  if (src.startsWith('```')) {
+    src = src.split('\n').slice(1).join('\n')
+    const idx = src.lastIndexOf('```')
+    if (idx >= 0) src = src.slice(0, idx)
+    src = src.trim()
+  }
+  const start = src.indexOf('{')
+  const end = src.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  try {
+    return JSON.stringify(JSON.parse(src.slice(start, end + 1)), null, 2)
+  } catch {
+    return null
+  }
 }
 
 // ── 工具参数摘要 ──
@@ -781,6 +807,23 @@ const displayItems = computed<DisplayItem[]>(() => {
 /* 展开状态：不限高 */
 .thought-content:not(.is-collapsed) .tool-result {
   max-height: none;
+}
+
+/* JSON 格式化展示区（plan/observe 完成后）*/
+.json-body {
+  background: rgba(10, 14, 31, 0.6);
+  color: #cdd6f4;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  font-size: 12px;
+  font-family: 'Fira Code', Consolas, monospace;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  overflow-y: auto;
+  max-height: 320px;
 }
 
 .placeholder {
