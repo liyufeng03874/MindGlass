@@ -95,7 +95,7 @@ export function useAgentGraph() {
 
       case 'node_streaming': {
         // 流式内容追加到 leftBlocks
-        const { node_id, node_type, content, is_complete } = event.data
+        const { node_id, node_type, content, is_complete, chunk } = event.data
         const blockType = nodeTypeToBlockType(node_type)
         const blockId = `block_${node_id}`
         const title = BLOCK_TITLES[node_type] || node_type
@@ -112,7 +112,13 @@ export function useAgentGraph() {
           }
           leftBlocks.value.push(block)
         }
-        block.content = content  // 用 content 直接覆盖（累计全文）
+        // chunk 里的报错提示（后端异常时会塞在 chunk 里）拼进 content，不让错误被静默吞掉
+        if (typeof chunk === 'string' && (chunk.startsWith('[流式调用出错') || chunk.startsWith('[LLM 流式调用超时'))) {
+          block.content = (block.content || '') + chunk
+          block.status = 'error'
+        } else {
+          block.content = content  // 用 content 直接覆盖（累计全文）
+        }
         if (is_complete) {
           block.status = 'done'
           block.title = title.replace('正在', '').replace('中...', '完成')
