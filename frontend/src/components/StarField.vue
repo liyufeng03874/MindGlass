@@ -85,16 +85,25 @@ const draw = () => {
   if (!ctx) return
   t += 1
 
-  // 相位 → 目标色，当前色缓动逼近
+  // 相位 → 目标色，当前色缓动逼近（呼吸感：强度随相位起伏）
   target = hexToRgb(phaseColor(phase.value))
-  cur.r = lerp(cur.r, target.r, 0.02)
-  cur.g = lerp(cur.g, target.g, 0.02)
-  cur.b = lerp(cur.b, target.b, 0.02)
+  // 加快插值速度，让相位切换更明显（0.02 → 0.08）
+  cur.r = lerp(cur.r, target.r, 0.08)
+  cur.g = lerp(cur.g, target.g, 0.08)
+  cur.b = lerp(cur.b, target.b, 0.08)
 
   ctx.clearRect(0, 0, w, h)
 
-  // 相位光晕：呼吸感径向渐变，强度随相位轻微起伏
-  const pulse = 0.10 + 0.03 * Math.sin(t * 0.01)
+  // 相位光晕：呼吸感径向渐变，强度随相位明显起伏
+  // idle 时最暗（0.12），planning/tooling 时最亮（0.25-0.28），done 时回归（0.18）
+  const phaseIntensity = phase.value === 'idle' ? 0.12
+    : phase.value === 'planning' ? 0.25
+    : phase.value === 'tooling' ? 0.28
+    : phase.value === 'observing' ? 0.22
+    : phase.value === 'answering' ? 0.24
+    : 0.18  // done
+  // 呼吸起伏更明显（0.04 → 0.06，频率 0.015 → 0.02）
+  const pulse = phaseIntensity + 0.06 * Math.sin(t * 0.02)
   const g = ctx.createRadialGradient(w * 0.62, h * 0.30, 0, w * 0.62, h * 0.30, Math.max(w, h) * 0.75)
   g.addColorStop(0, `rgba(${cur.r | 0},${cur.g | 0},${cur.b | 0},${pulse})`)
   g.addColorStop(1, 'rgba(0,0,0,0)')
