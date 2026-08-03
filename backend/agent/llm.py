@@ -5,7 +5,10 @@ from openai import OpenAI
 from typing import Generator
 
 from dotenv import load_dotenv
-load_dotenv()
+# .env 在仓库根目录（backend 的上级），不在 backend/ 里——按文件位置定位，避免依赖启动 cwd
+_ROOT_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env")
+load_dotenv(_ROOT_ENV)
+load_dotenv()  # 兜底：当前目录的 .env 仍可覆盖
 
 LLM_MODEL = os.getenv("MODEL", "qwen3.6-plus")
 

@@ -803,6 +803,9 @@ class ReactLoop:
             self.store.meta.plan_count = plan_count
             plan_result = last_plan.data
 
+        # 初始规划完成后步进，避免首轮 ToolCall 与 Plan 共享 step_index（右侧布局同层）
+        self.step_index += 1
+
         # ── 决策回环 ──
         while plan_result.get("decision") == "need_more" and plan_count < MAX_PLAN_COUNT:
             # 获取工具步骤
