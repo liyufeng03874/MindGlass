@@ -494,16 +494,17 @@ watch(
   margin-bottom: 12px;
 }
 
-/* --- 编辑侧边面板 --- */
+/* --- 编辑侧边面板 —— 深空主题 --- */
 .editor-panel {
   position: absolute;
   top: 0;
   right: -420px;
   width: 400px;
   height: 100%;
-  background: #fff;
-  border-left: 1px solid #e0e0e0;
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+  background: rgba(10, 14, 31, 0.92);
+  backdrop-filter: blur(16px);
+  border-left: 1px solid rgba(96, 165, 250, 0.4);
+  box-shadow: -4px 0 24px rgba(96, 165, 250, 0.15), -2px 0 0 rgba(96, 165, 250, 0.1);
   transition: right 0.3s ease;
   display: flex;
   flex-direction: column;
@@ -514,11 +515,12 @@ watch(
   right: 0;
 }
 
-/* --- 废弃回答弹窗 --- */
+/* --- 废弃回答弹窗 —— 深空主题 --- */
 .deprecated-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -528,44 +530,47 @@ watch(
 .deprecated-modal {
   width: min(720px, 92%);
   max-height: 86%;
-  background: #fff;
+  background: rgba(10, 14, 31, 0.95);
+  backdrop-filter: blur(16px);
   border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(192, 192, 220, 0.3);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(192, 192, 220, 0.1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-top: 4px solid #bfbfbf;
+  border-top: 3px solid rgba(192, 192, 220, 0.5);
 }
 
 .deprecated-modal .panel-header {
-  background: #fafafa;
-  border-bottom: 1px solid #eee;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding: 14px 18px;
 }
 
 .deprecated-modal .panel-header h3 {
   font-size: 15px;
-  color: #8c8c8c;
+  color: #c0c0dc;
 }
 
 .deprecated-body {
   flex: 1;
   overflow-y: auto;
   padding: 18px 22px;
+  color: #e6e9f5;
 }
 
 .deprecated-hint {
-  background: #fffbe6;
-  border: 1px solid #ffe58f;
+  background: rgba(255, 251, 230, 0.1);
+  border: 1px solid rgba(255, 229, 143, 0.4);
   border-radius: 8px;
-  color: #ad8b00;
+  color: #fbbf24;
   font-size: 13px;
   padding: 8px 12px;
   margin-bottom: 14px;
 }
 
 .deprecated-body .answer-content {
-  color: #595959;
+  color: #e6e9f5;
 }
 
 .panel-header {
@@ -573,13 +578,14 @@ watch(
   justify-content: space-between;
   align-items: center;
   padding: 16px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .panel-header h3 {
   margin: 0;
   font-size: 16px;
-  color: #333;
+  color: #e6e9f5;
 }
 
 .close-btn {
@@ -587,18 +593,20 @@ watch(
   border: none;
   font-size: 20px;
   cursor: pointer;
-  color: #999;
+  color: #6b6b80;
   padding: 4px 8px;
+  transition: color 0.2s;
 }
 
 .close-btn:hover {
-  color: #333;
+  color: #e6e9f5;
 }
 
 .panel-body {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  color: #e6e9f5;
 }
 
 .node-info {
@@ -616,46 +624,50 @@ watch(
 }
 
 .badge.plan {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.3);
 }
 
 .badge.toolcall {
-  background: #fff3e0;
-  color: #f57c00;
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
 .badge.observe {
-  background: #e8f5e9;
-  color: #388e3c;
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.3);
 }
 
 .badge.answer {
-  background: #f3e5f5;
-  color: #7b1fa2;
+  background: rgba(196, 181, 253, 0.15);
+  color: #c4b5fd;
+  border: 1px solid rgba(196, 181, 253, 0.3);
 }
 
 .step-label {
   font-size: 13px;
-  color: #888;
+  color: #a7a7ba;
 }
 
 .duration-badge {
   padding: 2px 8px;
-  background: #f0f0f0;
-  color: #666;
+  background: rgba(255, 255, 255, 0.06);
+  color: #a7a7ba;
   border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
   font-family: 'Menlo', 'Monaco', monospace;
 }
 
-/* 废弃提示横幅（ToolCall/Observe 面板顶部） */
+/* 废弃提示横幅 */
 .deprecated-hint-panel {
-  background: #fffbe6;
-  border: 1px solid #ffe58f;
+  background: rgba(255, 251, 230, 0.1);
+  border: 1px solid rgba(255, 229, 143, 0.3);
   border-radius: 8px;
-  color: #ad8b00;
+  color: #fbbf24;
   font-size: 13px;
   padding: 8px 12px;
   margin-bottom: 12px;
@@ -665,7 +677,7 @@ label {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #555;
+  color: #c0c0dc;
   margin-bottom: 4px;
   margin-top: 12px;
 }
@@ -674,28 +686,53 @@ label {
 .textarea-field {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid #ddd;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   font-size: 13px;
   font-family: 'Menlo', 'Monaco', monospace;
   resize: vertical;
   box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e6e9f5;
 }
 
 .input-field:focus,
 .textarea-field:focus {
   outline: none;
-  border-color: #1976d2;
-  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.15);
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+}
+
+.select-field {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  font-size: 13px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e6e9f5;
+  cursor: pointer;
+}
+
+.select-field:focus {
+  outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+}
+
+.select-field option {
+  background: #1a1e3a;
+  color: #e6e9f5;
 }
 
 .readonly-hint {
-  color: #999;
+  color: #6b6b80;
   font-style: italic;
   margin-top: 8px;
 }
 
-/* ── Plan 面板：决策展示 ── */
+/* ── Plan 面板：决策展示（深空主题）── */
 .decision-banner {
   padding: 8px 12px;
   border-radius: 8px;
@@ -704,25 +741,24 @@ label {
   margin-bottom: 12px;
 }
 .decision-sufficient {
-  background: #f6ffed;
-  color: #389e0d;
-  border: 1px solid #b7eb8f;
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.4);
 }
 .decision-need_more {
-  background: #fff7e6;
-  color: #d46b08;
-  border: 1px solid #ffd591;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
 }
 .decision-terminate {
-  background: #fff2f0;
-  color: #cf1322;
-  border: 1px solid #ffccc7;
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.4);
 }
-/* 废弃节点的决策横幅：统一为中性灰，不再显示红色 error 风格 */
 .decision-deprecated {
-  background: #f5f5f5;
-  color: #8c8c8c;
-  border: 1px solid #d9d9d9;
+  background: rgba(255, 255, 255, 0.04);
+  color: #6b6b80;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .info-list {
@@ -730,7 +766,7 @@ label {
   padding-left: 20px;
   font-size: 13px;
   line-height: 1.7;
-  color: #444;
+  color: #c0c0dc;
 }
 
 .step-list {
@@ -744,41 +780,42 @@ label {
 }
 .step-tool {
   display: inline-block;
-  background: #e8f4fd;
-  color: #1677ff;
+  background: rgba(96, 165, 250, 0.12);
+  color: #60a5fa;
   border-radius: 4px;
   padding: 1px 8px;
   font-size: 12px;
   font-weight: 600;
   margin-right: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.25);
 }
 .step-query {
-  color: #444;
+  color: #c0c0dc;
 }
 
 .terminate-note {
-  border-left: 3px solid #fa8c16;
-  background: #fffbe6;
+  border-left: 3px solid #fbbf24;
+  background: rgba(255, 251, 230, 0.08);
 }
 
-/* 输出预览区域 */
+/* 输出预览区域（深空主题） */
 .output-preview {
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .output-preview label {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #555;
+  color: #c0c0dc;
   margin-bottom: 8px;
 }
 
 .output-content {
-  background: #f8f9fa;
-  border: 1px solid #e8e8e8;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   padding: 10px 12px;
   font-size: 12px;
@@ -787,14 +824,14 @@ label {
   text-align: left;
   max-height: 300px;
   overflow-y: auto;
-  color: #333;
+  color: #c0c0dc;
 }
 
 .answer-content {
   text-align: left;
   font-size: 13px;
   line-height: 1.7;
-  color: #333;
+  color: #e6e9f5;
 }
 
 .answer-content :deep(h1),
@@ -802,17 +839,19 @@ label {
 .answer-content :deep(h3) {
   margin: 0.8em 0 0.4em;
   font-weight: 600;
+  color: #e6e9f5;
 }
 .answer-content :deep(h1) { font-size: 1.1em; }
 .answer-content :deep(h2) { font-size: 1.05em; }
 .answer-content :deep(h3) { font-size: 1em; }
 
-.answer-content :deep(p) { margin: 0.4em 0; }
+.answer-content :deep(p) { margin: 0.4em 0; color: #c0c0dc; }
 .answer-content :deep(code) {
-  background: rgba(0,0,0,0.06);
+  background: rgba(255, 255, 255, 0.06);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.9em;
+  color: #cdd6f4;
   font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
 }
 .answer-content :deep(pre) {
@@ -824,18 +863,18 @@ label {
   margin: 0.5em 0;
 }
 .answer-content :deep(pre code) { background: none; padding: 0; color: inherit; }
-.answer-content :deep(strong) { font-weight: 600; }
+.answer-content :deep(strong) { font-weight: 600; color: #e6e9f5; }
 
 .panel-footer {
   padding: 12px 16px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .retry-btn {
   width: 100%;
   padding: 10px;
-  background: #1976d2;
-  color: #fff;
+  background: #60a5fa;
+  color: #0a0e1f;
   border: none;
   border-radius: 8px;
   font-size: 14px;
@@ -845,11 +884,12 @@ label {
 }
 
 .retry-btn:hover {
-  background: #1565c0;
+  background: #93bbfc;
 }
 
 .retry-btn:disabled {
-  background: #ccc;
+  background: rgba(255, 255, 255, 0.08);
+  color: #6b6b80;
   cursor: not-allowed;
 }
 </style>

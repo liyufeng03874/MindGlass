@@ -53,14 +53,78 @@
                   'is-collapsed': blockGroup.single.type === 'toolcall' && !expandedBlocks[blockGroup.single.id]
                 }"
               >
-                <!-- plan/observe/answer → markdown 渲染；plan/observe 完成后若是 JSON 则格式化展示 -->
+                <!-- plan/observe/answer → 完成后尝试人读视图；流式中或解析失败回退原文 -->
                 <template v-if="blockGroup.single.type === 'plan' || blockGroup.single.type === 'observe' || blockGroup.single.type === 'answer'">
-                  <pre
-                    v-if="blockGroup.single.type !== 'answer' && formattedJson(blockGroup.single.content)"
-                    class="json-body"
-                  >{{ formattedJson(blockGroup.single.content) }}</pre>
-                  <div v-else-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
-                  <span v-else class="placeholder">等待内容...</span>
+                  <!-- 非最终回答的 plan/observe：完成后显示人读视图 -->
+                  <template v-if="blockGroup.single.type !== 'answer' && blockGroup.single.status === 'done'">
+                    <div v-if="parsedBlockContent(blockGroup.single)" class="readable-content">
+                      <!-- 人读结构化视图 -->
+                      <template v-if="parsedBlockContent(blockGroup.single)?.type === 'plan'">
+                        <div class="readable-section">
+                          <div class="readable-label">💭 思考</div>
+                          <div class="readable-text">{{ parsedBlockContent(blockGroup.single)?.thought || parsedBlockContent(blockGroup.single)?.reasoning || '' }}</div>
+                        </div>
+                        <div v-if="parsedBlockContent(blockGroup.single)?.steps?.length" class="readable-section">
+                          <div class="readable-label">📋 步骤</div>
+                          <ol class="readable-steps">
+                            <li v-for="(s, si) in parsedBlockContent(blockGroup.single)?.steps" :key="si">
+                              <span class="step-badge">{{ toolLabel(s.tool) }}</span>
+                              <span class="step-desc">{{ s.description || '' }}</span>
+                              <span v-if="s.params?.query" class="step-query">query: "{{ s.params.query }}"</span>
+                            </li>
+                          </ol>
+                        </div>
+                        <div v-if="parsedBlockContent(blockGroup.single)?.decision" class="readable-section">
+                          <div class="readable-label">🎯 决策</div>
+                          <span class="decision-badge" :class="`decision-${getDecision(blockGroup.single)}`">
+                            {{ getDecisionLabel(blockGroup.single) }}
+                          </span>
+                        </div>
+                      </template>
+                      <template v-else-if="parsedBlockContent(blockGroup.single)?.type === 'observe'">
+                        <div v-if="parsedBlockContent(blockGroup.single)?.summary" class="readable-section">
+                          <div class="readable-label">📝 摘要</div>
+                          <div class="readable-text">{{ parsedBlockContent(blockGroup.single)?.summary }}</div>
+                        </div>
+                        <div v-if="parsedBlockContent(blockGroup.single)?.key_findings?.length" class="readable-section">
+                          <div class="readable-label">🔑 要点</div>
+                          <ul class="readable-list">
+                            <li v-for="(f, fi) in parsedBlockContent(blockGroup.single)?.key_findings" :key="fi">{{ f }}</li>
+                          </ul>
+                        </div>
+                        <div v-if="parsedBlockContent(blockGroup.single)?.conflicts?.length" class="readable-section">
+                          <div class="readable-label">⚠️ 矛盾</div>
+                          <ul class="readable-list conflict-list">
+                            <li v-for="(c, ci) in parsedBlockContent(blockGroup.single)?.conflicts" :key="ci">
+                              <strong>{{ c.topic || '矛盾' }}</strong>：{{ c.resolution || '' }}
+                              <span v-if="c.confidence" class="confidence">（置信度: {{ c.confidence }}）</span>
+                            </li>
+                          </ul>
+                        </div>
+                        <div v-if="parsedBlockContent(blockGroup.single)?.new_info_vs_previous && (parsedBlockContent(blockGroup.single)?.round ?? 0) > 1" class="readable-section">
+                          <div class="readable-label">🆕 新增信息</div>
+                          <div class="readable-text">{{ parsedBlockContent(blockGroup.single)?.new_info_vs_previous }}</div>
+                        </div>
+                      </template>
+                      <!-- 查看原文按钮 -->
+                      <button class="toggle-raw-btn" @click="toggleRaw(blockGroup.single.id)">
+                        {{ showRaw[blockGroup.single.id] ? '收起原文' : '查看原文' }}
+                      </button>
+                      <!-- 原始 JSON（默认折叠） -->
+                      <pre v-if="showRaw[blockGroup.single.id] && formattedJson(blockGroup.single.content)" class="json-body">{{ formattedJson(blockGroup.single.content) }}</pre>
+                    </div>
+                    <!-- 流式中或解析失败：回退原文 -->
+                    <template v-else>
+                      <pre v-if="formattedJson(blockGroup.single.content)" class="json-body">{{ formattedJson(blockGroup.single.content) }}</pre>
+                      <div v-else-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
+                      <span v-else class="placeholder">等待内容...</span>
+                    </template>
+                  </template>
+                  <!-- 最终回答 answer：保持 markdown 渲染 -->
+                  <template v-else>
+                    <div v-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
+                    <span v-else class="placeholder">等待内容...</span>
+                  </template>
                 </template>
                 <!-- toolcall → 结果预览 -->
                 <template v-if="blockGroup.single.type === 'toolcall'">
@@ -293,6 +357,98 @@ const expandedBlocks = ref<Record<string, boolean>>({})
 
 function toggleExpand(blockId: string) {
   expandedBlocks.value[blockId] = !expandedBlocks.value[blockId]
+}
+
+// ── 查看原文折叠/展开 ──
+const showRaw = ref<Record<string, boolean>>({})
+
+function toggleRaw(blockId: string) {
+  showRaw.value[blockId] = !showRaw.value[blockId]
+}
+
+// ── 决策标签中文映射 ──
+const decisionLabels: Record<string, string> = {
+  sufficient: '✅ 信息充足',
+  need_more: '🔍 需要补搜',
+  terminate: '⚠️ 强制终止',
+}
+
+// ── 工具中文名映射 ──
+function toolLabel(tool: string): string {
+  const map: Record<string, string> = { search: '网络搜索', rag_retrieve: 'RAG 检索' }
+  return map[tool] || tool
+}
+
+/**
+ * 人读视图解析器：从 block content 中提取关键字段
+ * 返回 null 表示无法解析（回退原文展示）
+ */
+interface ParsedContent {
+  type: 'plan' | 'observe'
+  thought?: string
+  reasoning?: string
+  steps?: Array<{ tool: string; description: string; params?: Record<string, any> }>
+  decision?: string
+  summary?: string
+  key_findings?: string[]
+  conflicts?: Array<{ topic: string; resolution?: string; confidence?: string }>
+  new_info_vs_previous?: string
+  round?: number
+}
+
+function parsedBlockContent(block: LeftBlock): ParsedContent | null {
+  // 只有完成状态的 plan/observe 才做人读解析
+  if (block.status !== 'done') return null
+  if (!block.content) return null
+
+  let src = block.content.trim()
+  // 去 markdown 代码围栏
+  if (src.startsWith('```')) {
+    src = src.split('\n').slice(1).join('\n')
+    const idx = src.lastIndexOf('```')
+    if (idx >= 0) src = src.slice(0, idx)
+    src = src.trim()
+  }
+  const start = src.indexOf('{')
+  const end = src.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+
+  try {
+    const obj = JSON.parse(src.slice(start, end + 1))
+    if (block.type === 'plan') {
+      return {
+        type: 'plan',
+        thought: obj.thought || obj.reasoning || '',
+        reasoning: obj.reasoning || obj.thought || '',
+        steps: Array.isArray(obj.steps) ? obj.steps : [],
+        decision: obj.decision || '',
+      }
+    }
+    if (block.type === 'observe') {
+      return {
+        type: 'observe',
+        summary: obj.summary || '',
+        key_findings: Array.isArray(obj.key_findings) ? obj.key_findings : [],
+        conflicts: Array.isArray(obj.conflicts) ? obj.conflicts : [],
+        new_info_vs_previous: obj.new_info_vs_previous || '',
+        round: obj.round || 0,
+      }
+    }
+    return null
+  } catch {
+    return null  // 解析失败，回退原文
+  }
+}
+
+// ── 决策标签安全获取 ──
+function getDecision(block: LeftBlock): string {
+  const parsed = parsedBlockContent(block)
+  return parsed?.decision || ''
+}
+
+function getDecisionLabel(block: LeftBlock): string {
+  const d = getDecision(block)
+  return decisionLabels[d] || d
 }
 
 // ── Block 分组：连续 toolcall 聚合为并行组 ──
@@ -920,5 +1076,216 @@ const displayItems = computed<DisplayItem[]>(() => {
   color: var(--text-dim);
   box-shadow: none;
   cursor: not-allowed;
+}
+
+/* ═══ P1 人读视图样式 ═══ */
+
+.readable-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.readable-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.readable-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+
+.readable-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-h);
+  margin: 0;
+}
+
+/* 步骤列表 */
+.readable-steps {
+  margin: 4px 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-h);
+}
+
+.readable-steps li {
+  margin-bottom: 4px;
+}
+
+.step-badge {
+  display: inline-block;
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.step-desc {
+  color: var(--text);
+}
+
+.step-query {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: 'Fira Code', Consolas, monospace;
+}
+
+/* 决策徽章 */
+.readable-decision {
+  margin-top: 4px;
+}
+
+.decision-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.decision-badge.sufficient {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+
+.decision-badge.need_more {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.decision-badge.terminate {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+}
+
+/* 要点 bullet 列表 */
+.readable-list {
+  margin: 4px 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-h);
+}
+
+.readable-list li {
+  margin-bottom: 3px;
+}
+
+/* 矛盾列表 */
+.conflict-list {
+  color: var(--text-h);
+}
+
+.conflict-list strong {
+  color: #fbbf24;
+}
+
+.confidence {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* 查看原文按钮 */
+.toggle-raw-btn {
+  align-self: flex-start;
+  font-size: 11px;
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+
+.toggle-raw-btn:hover {
+  background: rgba(167, 139, 250, 0.12);
+  color: var(--accent);
+}
+
+/* ═══ P4 主题化滚动条 ═══ */
+
+.themed-scroll,
+.messages,
+.tool-result,
+.json-body,
+.readable-content,
+.readable-steps,
+.readable-list,
+.conflict-list,
+.output-preview,
+.output-content,
+.answer-content,
+.panel-body,
+.deprecated-body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167, 139, 250, 0.35) rgba(255, 255, 255, 0.04);
+}
+
+.themed-scroll::-webkit-scrollbar,
+.messages::-webkit-scrollbar,
+.tool-result::-webkit-scrollbar,
+.json-body::-webkit-scrollbar,
+.readable-content::-webkit-scrollbar,
+.output-preview::-webkit-scrollbar,
+.output-content::-webkit-scrollbar,
+.answer-content::-webkit-scrollbar,
+.panel-body::-webkit-scrollbar,
+.deprecated-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.themed-scroll::-webkit-scrollbar-track,
+.messages::-webkit-scrollbar-track,
+.tool-result::-webkit-scrollbar-track,
+.json-body::-webkit-scrollbar-track,
+.output-preview::-webkit-scrollbar-track,
+.output-content::-webkit-scrollbar-track,
+.answer-content::-webkit-scrollbar-track,
+.panel-body::-webkit-scrollbar-track,
+.deprecated-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+
+.themed-scroll::-webkit-scrollbar-thumb,
+.messages::-webkit-scrollbar-thumb,
+.tool-result::-webkit-scrollbar-thumb,
+.json-body::-webkit-scrollbar-thumb,
+.output-preview::-webkit-scrollbar-thumb,
+.output-content::-webkit-scrollbar-thumb,
+.answer-content::-webkit-scrollbar-thumb,
+.panel-body::-webkit-scrollbar-thumb,
+.deprecated-body::-webkit-scrollbar-thumb {
+  background: rgba(167, 139, 250, 0.35);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.themed-scroll::-webkit-scrollbar-thumb:hover,
+.messages::-webkit-scrollbar-thumb:hover,
+.tool-result::-webkit-scrollbar-thumb:hover,
+.json-body::-webkit-scrollbar-thumb:hover,
+.output-preview::-webkit-scrollbar-thumb:hover,
+.output-content::-webkit-scrollbar-thumb:hover,
+.answer-content::-webkit-scrollbar-thumb:hover,
+.panel-body::-webkit-scrollbar-thumb:hover,
+.deprecated-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(167, 139, 250, 0.6);
 }
 </style>
