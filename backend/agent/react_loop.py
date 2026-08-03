@@ -49,6 +49,36 @@ def _tool_label(tool_name: str) -> str:
     return TOOL_LABELS.get(tool_name, f"工具（{tool_name}）")
 
 
+def _extract_json(text: str) -> Optional[dict]:
+    """
+    健壮提取 LLM 输出中的 JSON 对象：
+    1. 去 markdown 代码围栏；2. 直接 loads；
+    3. 失败则截取第一个 '{' 到最后一个 '}' 再 loads
+    解析失败返回 None，由调用方兜底（不再静默丢信息）
+    """
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    try:
+        obj = json.loads(cleaned)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end > start:
+        try:
+            obj = json.loads(cleaned[start:end + 1])
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+    return None
+
+
 class ReactLoop:
     """决策循环（v2）：Plan-Observe 回环"""
 
@@ -58,6 +88,7 @@ class ReactLoop:
         self.query = ""
         self.step_index = 0
         self._last_node: Optional[ReasoningNode] = None
+        self._last_stream_content: str = ""
 
     # ── 基础设施 ──
 
@@ -115,7 +146,7 @@ class ReactLoop:
                     model=LLM_MODEL,
                     messages=messages,
                     temperature=0.3,
-                    max_tokens=2048,
+                    max_tokens=4096,
                     stream=True,
                 )
                 ft = ""
@@ -143,6 +174,8 @@ class ReactLoop:
                     continue
 
                 if tag == "error":
+                    full_text = content or full_text
+                    self._last_stream_content = full_text
                     yield self._emit("node_streaming", {
                         "node_id": node_id,
                         "node_type": node_type,
@@ -172,12 +205,16 @@ class ReactLoop:
                     full_text = content
                     break
 
+            # 流式结束后把最终全文存到实例属性，供调用方稳定取用
+            self._last_stream_content = full_text
+
             # 等待线程完成（清理）
             try:
                 await asyncio.wait_for(future, timeout=5)
             except asyncio.TimeoutError:
                 pass
         except asyncio.TimeoutError:
+            self._last_stream_content = full_text
             yield self._emit("node_streaming", {
                 "node_id": node_id,
                 "node_type": node_type,
@@ -373,13 +410,10 @@ class ReactLoop:
             ]
 
         # 流式调用 LLM
-        full_text = ""
         async for event in self._stream_llm(plan_node_id, "Plan", messages):
             yield event
-            # 提取 is_complete=True 时的 content
-            if '"is_complete": true' in event:
-                parsed_event = json.loads(event.split("\n")[0].replace("data: ", ""))
-                full_text = parsed_event["data"]["content"]
+        # 流式结束后从实例属性取全文（避开脆弱的字符串匹配）
+        full_text = self._last_stream_content
 
         # 解析 JSON
         if plan_count == 1:
@@ -395,10 +429,9 @@ class ReactLoop:
     def _parse_plan_result(self, text: str, query: str) -> dict:
         """解析首次规划的 JSON 结果"""
         try:
-            cleaned = text.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            parsed = json.loads(cleaned)
+            parsed = _extract_json(text)
+            if parsed is None:
+                raise ValueError("no json found")
             parsed["decision"] = "need_more"
             parsed["plan_count"] = 1
             return parsed
@@ -415,10 +448,9 @@ class ReactLoop:
     def _parse_decision_result(self, text: str, plan_count: int) -> dict:
         """解析决策判断的 JSON 结果"""
         try:
-            cleaned = text.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            parsed = json.loads(cleaned)
+            parsed = _extract_json(text)
+            if parsed is None:
+                raise ValueError("no json found")
             parsed["plan_count"] = plan_count
 
             # 第 3 轮强制：如果 LLM 仍然返回 need_more，覆盖为 terminate
@@ -498,29 +530,36 @@ class ReactLoop:
         ]
 
         # 流式调用 LLM
-        full_text = ""
         try:
             async for event in self._stream_llm(obs_node_id, "Observe", messages):
                 yield event
-                if '"is_complete": true' in event:
-                    parsed_event = json.loads(event.split("\n")[0].replace("data: ", ""))
-                    full_text = parsed_event["data"]["content"]
-        except Exception as e:
+            full_text = self._last_stream_content or None
+        except Exception:
             # 超时或其他异常，用原始结果生成简单摘要
             full_text = None
 
-        # 解析 JSON
+        # 解析 JSON（健壮提取：去围栏 + 截取最外层 {}）
         if full_text:
-            try:
-                cleaned = full_text.strip()
-                if cleaned.startswith("```"):
-                    cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-                obs_output = json.loads(cleaned)
+            obs_output = _extract_json(full_text)
+            if obs_output is not None:
                 obs_output["round"] = round_num
-            except Exception:
+            else:
+                # 解析失败兜底：不丢信息——把工具成功情况带进摘要，避免 Plan 误判"无有效信息"
+                ok_count = sum(
+                    1 for r in self._last_raw_results
+                    if not (isinstance(r, dict) and "error" in r)
+                )
+                total = len(self._last_raw_results)
+                if ok_count > 0:
+                    fallback_summary = (
+                        f"评估输出解析失败，但本轮 {total} 个工具调用中有 {ok_count} 个成功返回了结果，"
+                        "原始结果已保留，建议基于已有结果继续。"
+                    )
+                else:
+                    fallback_summary = "评估结果解析失败，原始结果已保留"
                 obs_output = {
                     "round": round_num,
-                    "summary": "评估结果解析失败，原始结果已保留",
+                    "summary": fallback_summary,
                     "key_findings": [],
                     "conflicts": [],
                     "duplicates_removed": 0,
@@ -618,9 +657,7 @@ class ReactLoop:
         try:
             async for event in self._stream_llm(answer_node_id, "Answer", messages):
                 yield event
-                if '"is_complete": true' in event:
-                    parsed_event = json.loads(event.split("\n")[0].replace("data: ", ""))
-                    full_text = parsed_event["data"]["content"]
+            full_text = self._last_stream_content or full_text
         except Exception:
             full_text = f"回答生成超时（{LLM_TIMEOUT}s），请重试。"
 
