@@ -169,6 +169,18 @@ const { fitView } = useVueFlow()
 // --- 编辑面板 ---
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
+// 让所有 Markdown 链接在新标签页打开，不抢走当前页面
+const defaultLinkRender = md.renderer.rules.link_open ||
+  ((tokens: any[], idx: number, options: any, _env: any, self: any) => self.renderToken(tokens, idx, options))
+md.renderer.rules.link_open = (tokens: any[], idx: number, options: any, env: any, self: any) => {
+  const tIdx = tokens[idx].attrIndex('target')
+  if (tIdx < 0) {
+    tokens[idx].attrPush(['target', '_blank'])
+    tokens[idx].attrPush(['rel', 'noopener noreferrer'])
+  }
+  return defaultLinkRender(tokens, idx, options, env, self)
+}
+
 const editingNode = ref<AgentNode | null>(null)
 /** 废弃回答弹窗（replaced/branch 状态的 Answer） */
 const deprecatedAnswer = ref<AgentNode | null>(null)

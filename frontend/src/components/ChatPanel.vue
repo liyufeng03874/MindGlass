@@ -44,6 +44,18 @@ import MirrorIcon from './MirrorIcon.vue'
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
+// 让所有 Markdown 链接在新标签页打开，不抢走当前页面
+const defaultLinkRender = md.renderer.rules.link_open ||
+  ((tokens: any[], idx: number, options: any, _env: any, self: any) => self.renderToken(tokens, idx, options))
+md.renderer.rules.link_open = (tokens: any[], idx: number, options: any, env: any, self: any) => {
+  const tIdx = tokens[idx].attrIndex('target')
+  if (tIdx < 0) {
+    tokens[idx].attrPush(['target', '_blank'])
+    tokens[idx].attrPush(['rel', 'noopener noreferrer'])
+  }
+  return defaultLinkRender(tokens, idx, options, env, self)
+}
+
 const props = defineProps<{
   messages: Array<{ role: 'user' | 'agent', content: string }>
   disabled?: boolean
