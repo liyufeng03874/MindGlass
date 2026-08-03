@@ -748,14 +748,17 @@ class ReactLoop:
             self._last_raw_results.append(res)
             self._last_tc_node_ids.append(tc_node.id)
 
-            # 补强 node_complete 事件：带 tool_name、params、result_preview
+            # 补强 node_complete 事件：带 tool_name、params、result_preview、result_full
             tool_name = s.get("tool", "search")
             params = s.get("params", {})
-            # 结果预览：截断 500 字
+            # 结果预览：截断 4000 字（任务⑦：500 → 4000，让左侧能看到更多内容）
             if isinstance(res, dict):
-                result_preview = json.dumps(res, ensure_ascii=False)[:500]
+                result_preview = json.dumps(res, ensure_ascii=False)[:4000]
+                # 完整结果 JSON 字符串——左侧人读视图直接用它，避免截断
+                result_full = json.dumps(res, ensure_ascii=False)
             else:
-                result_preview = str(res)[:500]
+                result_preview = str(res)[:4000]
+                result_full = str(res)
 
             yield self._emit("node_complete", {
                 "node": tc_node.to_dict(),
@@ -764,6 +767,7 @@ class ReactLoop:
                 "tool_name": tool_name,
                 "params": params,
                 "result_preview": result_preview,
+                "result_full": result_full,
             })
 
     # ── 主循环 ──
