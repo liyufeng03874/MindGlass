@@ -156,11 +156,9 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'retry', stepIndex: number, editedData: Record<string, any>): void
+  (e: 'retry', stepIndex: number, originalNode: any, editedData: Record<string, any>): void
   (e: 'focus-answer'): void
 }>()
-
-const vueFlowRef = ref(null)
 const graphRef = computed(() => props.graph)
 const { flowNodes: nodes, flowEdges: edges } = useReasoningGraph(graphRef)
 

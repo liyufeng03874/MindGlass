@@ -1,6 +1,6 @@
 import { computed, type ComputedRef } from 'vue'
 import type { Node, Edge } from '@vue-flow/core'
-import type { ReasoningGraph, AgentNode, AgentEdge, NodeStatus } from '@/types/agent'
+import type { ReasoningGraph, AgentNode } from '@/types/agent'
 
 // 节点类型 → 颜色映射
 const NODE_COLORS: Record<string, { bg: string; border: string; label: string }> = {
@@ -179,8 +179,8 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       const isPendingEdge = edge.type === 'Pending'
 
       // 检查边的任一端点是否为 branch/replaced——是则整条边置灰
-      const targetNode = graph.value.nodes.find(n => n.id === edge.to)
-      const sourceNode = graph.value.nodes.find(n => n.id === edge.from)
+      const targetNode = graph.value?.nodes.find(n => n.id === edge.to)
+      const sourceNode = graph.value?.nodes.find(n => n.id === edge.from)
       const endpointDeprecated =
         targetNode?.status === 'replaced' || targetNode?.status === 'branch' ||
         sourceNode?.status === 'replaced' || sourceNode?.status === 'branch'
@@ -203,6 +203,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
               width: 12,
               height: 12,
               orient: 'auto',
+              // @ts-ignore Vue Flow 的 EdgeMarker 类型定义不包含 refX/refY，但运行时有效
               refX: 6,
               refY: 6,
               color: style.color,

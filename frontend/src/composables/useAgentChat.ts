@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { SSEEvent, ReasoningGraph } from '@/types/agent'
+import type { SSEEvent } from '@/types/agent'
 
 // API 地址：生产环境通过 nginx 反代 /api，开发环境可覆盖 VITE_API_BASE_URL
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''

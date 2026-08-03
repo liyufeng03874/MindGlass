@@ -48,6 +48,23 @@ export interface ReasoningGraph {
 
 /** SSE 事件类型 */
 export interface SSEEvent {
-  type: 'node_complete' | 'status' | 'run_complete' | 'error'
+  type: 'node_streaming' | 'node_complete' | 'status' | 'run_complete' | 'error'
   data: Record<string, any>
+}
+
+/** 左侧思考直播 Block */
+export interface LeftBlock {
+  id: string            // = node_id
+  nodeId: string
+  type: 'plan' | 'toolcall' | 'observe' | 'answer'
+  status: 'loading' | 'done' | 'error'
+  title: string         // 如 "🧠 正在规划..."
+  content: string       // 流式内容（node_streaming 的 content 直接覆盖）
+  metadata?: {
+    toolName?: string
+    params?: Record<string, any>
+    resultPreview?: string
+  }
+  // 用于并行工具块分组
+  parallelGroupId?: string
 }

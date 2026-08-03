@@ -1,15 +1,107 @@
 <template>
   <div class="chat-panel" :style="{ '--phase-border': phaseBorderColor }">
-    <div class="messages" ref="messagesRef">
+    <div class="messages" ref="messagesRef" @scroll="handleScroll">
       <!-- 开场白 -->
-      <div v-if="messages.length === 0 && initialGreeting" class="message agent greeting">
+      <div v-if="messages.length === 0 && initialGreeting && (!leftBlocks || leftBlocks.length === 0)" class="message agent greeting">
         <div class="avatar greeting-avatar"><MirrorIcon :size="26" /></div>
         <div class="bubble greeting-bubble">{{ initialGreeting }}</div>
       </div>
 
+      <!-- ═══ 思考直播区 ═══ -->
+      <!-- 将连续的 toolcall block 分组为并行组（同 parallelGroupId） -->
+      <template v-for="blockGroup in blockGroups" :key="blockGroup.groupId">
+        <!-- 单列 block（plan/observe/answer 或孤立 toolcall） -->
+        <div
+          v-if="blockGroup.single"
+          :class="['thought-block', `thought-${blockGroup.single.type}`]"
+        >
+          <!-- 标题行 -->
+          <div class="thought-header">
+            <span class="thought-title" :class="{ 'is-loading': blockGroup.single.status === 'loading' }">
+              {{ blockGroup.single.title }}
+              <span v-if="blockGroup.single.status === 'loading'" class="pulse-dot" />
+            </span>
+            <!-- ToolCall 展开/收起按钮 -->
+            <button
+              v-if="blockGroup.single.type === 'toolcall' && blockGroup.single.metadata?.resultPreview"
+              class="expand-btn"
+              @click="toggleExpand(blockGroup.single.id)"
+            >
+              {{ expandedBlocks[blockGroup.single.id] ? '收起' : '展开' }}
+            </button>
+          </div>
+          <!-- 内容区 -->
+          <div
+            class="thought-content"
+            :class="{
+              'is-loading': blockGroup.single.status === 'loading',
+              'is-collapsed': blockGroup.single.type === 'toolcall' && !expandedBlocks[blockGroup.single.id]
+            }"
+          >
+            <!-- plan/observe/answer → markdown 渲染 -->
+            <template v-if="blockGroup.single.type === 'plan' || blockGroup.single.type === 'observe' || blockGroup.single.type === 'answer'">
+              <div v-if="blockGroup.single.content" class="markdown-body" v-html="md.render(blockGroup.single.content)" />
+              <span v-else class="placeholder">等待内容...</span>
+            </template>
+            <!-- toolcall → 结果预览 -->
+            <template v-if="blockGroup.single.type === 'toolcall'">
+              <div class="tool-params" v-if="blockGroup.single.metadata?.params">
+                <span class="tool-param-label">参数：</span>
+                <code>{{ summarizeParams(blockGroup.single.metadata.params) }}</code>
+              </div>
+              <pre class="tool-result" v-if="blockGroup.single.metadata?.resultPreview">{{ blockGroup.single.metadata.resultPreview }}</pre>
+              <span v-else class="placeholder">无结果</span>
+            </template>
+          </div>
+        </div>
+
+        <!-- 并行工具组（两列 grid） -->
+        <div
+          v-else-if="(blockGroup.blocks?.length ?? 0) > 0"
+          class="thought-block thought-toolcall-parallel"
+        >
+          <div class="tool-parallel-grid">
+            <div
+              v-for="block in blockGroup.blocks"
+              :key="block.id"
+              class="thought-block thought-toolcall parallel-card"
+            >
+              <div class="thought-header">
+                <span class="thought-title" :class="{ 'is-loading': block.status === 'loading' }">
+                  {{ block.title }}
+                  <span v-if="block.status === 'loading'" class="pulse-dot" />
+                </span>
+                <button
+                  v-if="block.metadata?.resultPreview"
+                  class="expand-btn"
+                  @click="toggleExpand(block.id)"
+                >
+                  {{ expandedBlocks[block.id] ? '收起' : '展开' }}
+                </button>
+              </div>
+              <div
+                class="thought-content"
+                :class="{
+                  'is-loading': block.status === 'loading',
+                  'is-collapsed': !expandedBlocks[block.id]
+                }"
+              >
+                <div class="tool-params" v-if="block.metadata?.params">
+                  <span class="tool-param-label">参数：</span>
+                  <code>{{ summarizeParams(block.metadata.params) }}</code>
+                </div>
+                <pre class="tool-result" v-if="block.metadata?.resultPreview">{{ block.metadata.resultPreview }}</pre>
+                <span v-else class="placeholder">无结果</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 现有 messages（用户问题 + 最终回答） -->
       <div
         v-for="(msg, idx) in displayMessages"
-        :key="idx"
+        :key="'msg-' + idx"
         :data-msg-index="idx"
         :class="['message', msg.role]"
       >
@@ -22,6 +114,12 @@
         <div class="bubble thinking">{{ statusText || '正在规划...' }}</div>
       </div>
     </div>
+
+    <!-- 回到最新按钮 -->
+    <button v-if="showBackToBottom" class="back-to-bottom" @click="scrollToBottom">
+      ↓ 回到最新
+    </button>
+
     <div class="input-area">
       <input
         v-model="inputValue"
@@ -40,6 +138,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
 import MarkdownIt from 'markdown-it'
+import type { LeftBlock } from '../types/agent'
 import MirrorIcon from './MirrorIcon.vue'
 import { usePhase, phaseColor } from '../composables/usePhase'
 
@@ -63,6 +162,7 @@ const props = defineProps<{
   initialGreeting?: string
   statusText?: string
   totalElapsed?: string | null
+  leftBlocks?: LeftBlock[]
 }>()
 
 const emit = defineEmits<{
@@ -78,37 +178,57 @@ const loading = computed(() => props.disabled)
 const { phase } = usePhase()
 const phaseBorderColor = computed(() => phaseColor(phase.value))
 
-/** 将总用时追加到最后一条 agent 消息末尾 */
-const displayMessages = computed(() => {
-  if (!props.messages.length || !props.totalElapsed) return props.messages
-  const lastAgent = [...props.messages].reverse().find(m => m.role === 'agent')
-  if (!lastAgent) return props.messages
-  const elapsedTag = `\n\n---\n\n*（本次推理耗时 ${props.totalElapsed}）*`
-  return props.messages.map((m, i) => {
-    if (m === lastAgent && i === props.messages.length - 1) {
-      return { ...m, content: m.content + elapsedTag }
-    }
-    return m
-  })
-})
+// ── 自动滚动：检测用户是否在底部 ──
+const showBackToBottom = ref(false)
+const isNearBottom = ref(true)
 
+/** 滚动到最底部 */
+function scrollToBottom() {
+  if (messagesRef.value) {
+    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  }
+}
+
+/** 判断是否接近底部（阈值 60px） */
+function isAtBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 60
+}
+
+function handleScroll() {
+  if (messagesRef.value) {
+    isNearBottom.value = isAtBottom(messagesRef.value)
+    showBackToBottom.value = !isNearBottom.value
+  }
+}
+
+// 新 block/chunk 到来时，若用户贴底则自动滚到底
+watch(
+  () => props.leftBlocks?.length,
+  () => {
+    nextTick(() => {
+      if (isNearBottom.value && messagesRef.value) {
+        messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+      }
+    })
+  },
+  { deep: true }
+)
+
+// 新消息到来时也自动滚
 watch(() => props.messages.length, async () => {
   await nextTick()
-  if (messagesRef.value) {
+  if (messagesRef.value && isNearBottom.value) {
     messagesRef.value.scrollTop = messagesRef.value.scrollHeight
   }
 })
 
 function highlightLastMessage() {
   if (messagesRef.value && props.messages.length > 0) {
-    // 滚动到最后一条
     messagesRef.value.scrollTo({
       top: messagesRef.value.scrollHeight,
       behavior: 'smooth',
     })
-    // 高亮最后一条 agent 消息
     highlightIndex.value = props.messages.length - 1
-    // 2秒后取消高亮
     setTimeout(() => {
       highlightIndex.value = null
     }, 2000)
@@ -123,6 +243,76 @@ function handleSend() {
   emit('send', query)
   inputValue.value = ''
 }
+
+// ── 工具参数摘要 ──
+function summarizeParams(params: Record<string, any>): string {
+  if (!params) return ''
+  const parts: string[] = []
+  if (params.query) parts.push(`query="${params.query}"`)
+  if (params.top_k) parts.push(`top_k=${params.top_k}`)
+  const keys = Object.keys(params).filter(k => !['query', 'top_k'].includes(k))
+  for (const k of keys.slice(0, 2)) {
+    parts.push(`${k}="${params[k]}"`)
+  }
+  return parts.join(', ') || JSON.stringify(params)
+}
+
+// ── 工具结果展开/收起 ──
+const expandedBlocks = ref<Record<string, boolean>>({})
+
+function toggleExpand(blockId: string) {
+  expandedBlocks.value[blockId] = !expandedBlocks.value[blockId]
+}
+
+// ── Block 分组：连续 toolcall 聚合为并行组 ──
+// 聚合规则：相邻且类型都是 'toolcall' 且都有 parallelGroupId 的 block 归为一组；
+// 孤立的 toolcall 或不同类型的 block 作为 single 输出。
+interface BlockGroup {
+  groupId: string
+  single?: LeftBlock
+  blocks?: LeftBlock[]
+}
+
+const blockGroups = computed<BlockGroup[]>(() => {
+  const blocks = props.leftBlocks || []
+  const groups: BlockGroup[] = []
+  let i = 0
+  while (i < blocks.length) {
+    const b = blocks[i]
+    // 检查是否是并行 toolcall 组的开始
+    if (b.type === 'toolcall' && b.parallelGroupId) {
+      const pgId = b.parallelGroupId!
+      const groupBlocks: LeftBlock[] = []
+      while (i < blocks.length && blocks[i].type === 'toolcall' && blocks[i].parallelGroupId === pgId) {
+        groupBlocks.push(blocks[i])
+        i++
+      }
+      if (groupBlocks.length > 1) {
+        groups.push({ groupId: `parallel_${pgId}`, blocks: groupBlocks })
+      } else {
+        groups.push({ groupId: `single_${groupBlocks[0].id}`, single: groupBlocks[0] })
+      }
+    } else {
+      groups.push({ groupId: `single_${b.id}`, single: b })
+      i++
+    }
+  }
+  return groups
+})
+
+/** 将总用时追加到最后一条 agent 消息末尾 */
+const displayMessages = computed(() => {
+  if (!props.messages.length || !props.totalElapsed) return props.messages
+  const lastAgent = [...props.messages].reverse().find(m => m.role === 'agent')
+  if (!lastAgent) return props.messages
+  const elapsedTag = `\n\n---\n\n*（本次推理耗时 ${props.totalElapsed}）*`
+  return props.messages.map((m, i) => {
+    if (m === lastAgent && i === props.messages.length - 1) {
+      return { ...m, content: m.content + elapsedTag }
+    }
+    return m
+  })
+})
 </script>
 
 <style scoped>
@@ -134,6 +324,7 @@ function handleSend() {
   border-right: 2px solid var(--phase-border, var(--panel-border));
   transition: border-color 0.8s ease;
   box-shadow: inset -1px 0 8px rgba(167, 139, 250, 0.05);
+  position: relative;
 }
 
 .messages {
@@ -347,6 +538,235 @@ function handleSend() {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══ 思考直播区样式 ═══ */
+
+.thought-block {
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+/* 不同类型左边框颜色区分 */
+.thought-plan {
+  border-left: 3px solid #a78bfa;
+}
+.thought-toolcall {
+  border-left: 3px solid #f59e0b;
+}
+.thought-observe {
+  border-left: 3px solid #10b981;
+}
+.thought-answer {
+  border-left: 3px solid #3b82f6;
+}
+
+.thought-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.thought-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Loading 脉冲动画 */
+.thought-title.is-loading {
+  animation: pulseText 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseText {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.pulse-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulseDot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulseDot {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 4px var(--accent);
+  }
+  50% {
+    opacity: 0.4;
+    box-shadow: 0 0 12px var(--accent);
+  }
+}
+
+.expand-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.expand-btn:hover {
+  background: rgba(167, 139, 250, 0.15);
+  color: var(--text-h);
+}
+
+.thought-content {
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* Loading 状态：底部呼吸边框 */
+.thought-content.is-loading {
+  position: relative;
+  animation: loadingPulse 2s ease-in-out infinite;
+}
+
+@keyframes loadingPulse {
+  0%, 100% {
+    border-bottom: 1px solid transparent;
+  }
+  50% {
+    border-bottom: 1px solid rgba(167, 139, 250, 0.3);
+  }
+}
+
+/* Markdown 渲染区域 */
+.thought-content :deep(h1),
+.thought-content :deep(h2),
+.thought-content :deep(h3) {
+  margin: 0.6em 0 0.3em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.thought-content :deep(h1) { font-size: 1.15em; }
+.thought-content :deep(h2) { font-size: 1.05em; }
+.thought-content :deep(p) { margin: 0.3em 0; }
+.thought-content :deep(code) {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: 'Fira Code', Consolas, monospace;
+}
+.thought-content :deep(pre) {
+  background: #1e1e2e;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+.thought-content :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+.thought-content :deep(ul),
+.thought-content :deep(ol) {
+  margin: 0.3em 0;
+  padding-left: 1.5em;
+}
+.thought-content :deep(li) { margin: 0.15em 0; }
+
+/* 工具参数行 */
+.tool-params {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.tool-params code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'Fira Code', Consolas, monospace;
+  font-size: 0.95em;
+}
+
+/* 工具结果区：默认限高 200px，可展开 */
+.tool-result {
+  background: #1a1a2e;
+  color: #cdd6f4;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'Fira Code', Consolas, monospace;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  overflow-y: auto;
+  max-height: 200px;
+}
+
+/* 折叠状态：限高 200px */
+.thought-content.is-collapsed .tool-result {
+  max-height: 200px;
+}
+
+/* 展开状态：不限高 */
+.thought-content:not(.is-collapsed) .tool-result {
+  max-height: none;
+}
+
+.placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 12px;
+}
+
+/* 并行工具组网格 */
+.tool-parallel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px;
+}
+
+.parallel-card {
+  margin: 0;
+}
+
+.parallel-card .thought-content {
+  font-size: 12px;
+}
+
+/* 回到最新按钮 */
+.back-to-bottom {
+  position: absolute;
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  background: var(--panel-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+  transition: all 0.2s;
+}
+
+.back-to-bottom:hover {
+  background: rgba(167, 139, 250, 0.15);
 }
 
 .input-area {

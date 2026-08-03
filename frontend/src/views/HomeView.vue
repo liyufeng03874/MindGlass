@@ -48,6 +48,7 @@
           :disabled="isRunning"
           :statusText="status"
           :totalElapsed="isRunning ? null : totalElapsed"
+          :leftBlocks="leftBlocks"
           @send="onSend"
           :initialGreeting="initialGreeting"
         />
@@ -62,14 +63,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onUnmounted } from 'vue'
+import { ref, watch, computed } from 'vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ReasoningGraph from '../components/ReasoningGraph.vue'
 import MirrorIcon from '../components/MirrorIcon.vue'
 import { useAgentGraph } from '../composables/useAgentGraph'
 import { usePhase, derivePhase } from '../composables/usePhase'
 
-const { graph, status, connected, messages, isRunning, sendMessage, retryFrom } = useAgentGraph()
+const { graph, status, connected, messages, isRunning, leftBlocks, sendMessage, retryFrom } = useAgentGraph()
 
 // ── 全局相位：从推理状态推导，驱动整站氛围层呼吸（水镜 v2.1 第一遍）──
 const { phase } = usePhase()
@@ -197,7 +198,7 @@ function loadTestData(demoName: string = '1') {
 }
 
 function clearDemo() {
-  graph.value = { nodes: [], edges: [] }
+  graph.value = { nodes: [], edges: [], branches: [], meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' } }
   messages.value = []
   showGraph.value = true
   demoLoaded.value = false

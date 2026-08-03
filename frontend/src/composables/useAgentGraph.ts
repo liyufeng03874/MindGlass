@@ -1,10 +1,27 @@
 import {ref} from 'vue'
-import type {AgentNode, AgentEdge, ReasoningGraph, SSEEvent} from '@/types/agent'
+import type {AgentNode, ReasoningGraph, SSEEvent, LeftBlock} from '@/types/agent'
 
 // API 地址：生产环境通过 nginx 反代 /api，开发环境可覆盖 VITE_API_BASE_URL
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 let pendingIdCounter = 0
+
+// ── Block 标题映射 ──
+const BLOCK_TITLES: Record<string, string> = {
+  Plan: '🧠 正在规划...',
+  Observe: '🔍 评估中...',
+  Answer: '💬 生成回答...',
+}
+
+function nodeTypeToBlockType(nodeType: string): LeftBlock['type'] {
+  const map: Record<string, LeftBlock['type']> = {
+    Plan: 'plan',
+    ToolCall: 'toolcall',
+    Observe: 'observe',
+    Answer: 'answer',
+  }
+  return map[nodeType] || 'plan'
+}
 
 export function useAgentGraph() {
   const graph = ref<ReasoningGraph>({
@@ -16,6 +33,9 @@ export function useAgentGraph() {
   const status = ref('')
   const connected = ref(false)
   const isRunning = ref(false)
+
+  /** 左侧思考直播 Block 列表 */
+  const leftBlocks = ref<LeftBlock[]>([])
 
   const messages = ref<Array<{ role: 'user' | 'agent', content: string }>>([])
 
@@ -73,6 +93,33 @@ export function useAgentGraph() {
         status.value = event.data.message
         break
 
+      case 'node_streaming': {
+        // 流式内容追加到 leftBlocks
+        const { node_id, node_type, content, is_complete } = event.data
+        const blockType = nodeTypeToBlockType(node_type)
+        const blockId = `block_${node_id}`
+        const title = BLOCK_TITLES[node_type] || node_type
+
+        let block = leftBlocks.value.find((b: LeftBlock) => b.id === blockId)
+        if (!block) {
+          block = {
+            id: blockId,
+            nodeId: node_id,
+            type: blockType,
+            status: 'loading',
+            title,
+            content: '',
+          }
+          leftBlocks.value.push(block)
+        }
+        block.content = content  // 用 content 直接覆盖（累计全文）
+        if (is_complete) {
+          block.status = 'done'
+          block.title = title.replace('正在', '').replace('中...', '完成')
+        }
+        break
+      }
+
       case 'node_complete': {
         const node = event.data.node as AgentNode
 
@@ -111,6 +158,37 @@ export function useAgentGraph() {
           }
         }
 
+        // ToolCall 类型 → 填充 leftBlocks 的 metadata（toolName/params/resultPreview）
+        if (node.type === 'ToolCall') {
+          const blockType: LeftBlock['type'] = 'toolcall'
+          const blockId = `block_${node.id}`
+          let block = leftBlocks.value.find((b: LeftBlock) => b.id === blockId)
+          if (!block) {
+            block = {
+              id: blockId,
+              nodeId: node.id,
+              type: blockType,
+              status: node.status === 'error' ? 'error' : 'done',
+              title: `🔧 调用工具: ${event.data.tool_name || node.data?.tool || '未知'}`,
+              content: '',
+              metadata: {
+                toolName: event.data.tool_name || node.data?.tool,
+                params: event.data.params || node.data?.params,
+                resultPreview: event.data.result_preview || '',
+              },
+              parallelGroupId: node.data?.parallel_group_id,
+            }
+            leftBlocks.value.push(block)
+          } else {
+            block.status = node.status === 'error' ? 'error' : 'done'
+            block.metadata = {
+              toolName: event.data.tool_name || node.data?.tool,
+              params: event.data.params || node.data?.params,
+              resultPreview: event.data.result_preview || '',
+            }
+          }
+        }
+
         // v2 预测逻辑：
         //   Plan   → 待决策（Plan 之后不确定是 ToolCall 还是 Answer）
         //   ToolCall → Observe（固定）
@@ -145,6 +223,12 @@ export function useAgentGraph() {
           console.log('[Run Complete] edges:', JSON.stringify(event.data.graph.edges, null, 2))
           graph.value = event.data.graph as ReasoningGraph
           console.log('[Run Complete]', graph.value.nodes.length, 'nodes', graph.value.edges.length, 'edges')
+        }
+        // 所有 leftBlocks 标记为 done（run_complete 时确保状态正确）
+        for (const block of leftBlocks.value) {
+          if (block.status === 'loading') {
+            block.status = 'done'
+          }
         }
         break
       }
@@ -400,6 +484,7 @@ export function useAgentGraph() {
     connected,
     isRunning,
     messages,
+    leftBlocks,
     sendMessage,
     retryFrom,
     retryFromGraph,
