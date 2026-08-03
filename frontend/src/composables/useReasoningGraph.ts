@@ -2,23 +2,23 @@ import { computed, type ComputedRef } from 'vue'
 import type { Node, Edge } from '@vue-flow/core'
 import type { ReasoningGraph, AgentNode } from '@/types/agent'
 
-// 节点类型 → 颜色映射
+/** 深空主题节点配色：半透明深色底 + 发光边框 + 浅色文字 */
 const NODE_COLORS: Record<string, { bg: string; border: string; label: string }> = {
-  Plan:      { bg: '#e8f4fd', border: '#1677ff', label: '🧠 规划' },
-  ToolCall:  { bg: '#f6ffed', border: '#52c41a', label: '🔧 执行' },
-  Observe:   { bg: '#fff7e6', border: '#fa8c16', label: '📡 观察' },
-  Answer:    { bg: '#f9f0ff', border: '#722ed1', label: '💬 回答' },
-  Decision:  { bg: '#fffbe6', border: '#faad14', label: '⏳ 待决策' },
+  Plan:      { bg: 'rgba(10,14,31,0.72)', border: '#60a5fa', label: '🧠 规划' },
+  ToolCall:  { bg: 'rgba(10,14,31,0.72)', border: '#34d399', label: '🔧 执行' },
+  Observe:   { bg: 'rgba(10,14,31,0.72)', border: '#fbbf24', label: '📡 观察' },
+  Answer:    { bg: 'rgba(10,14,31,0.72)', border: '#c4b5fd', label: '💬 回答' },
+  Decision:  { bg: 'rgba(10,14,31,0.72)', border: '#f59e0b', label: '⏳ 待决策' },
 }
 
-// 边类型 → 样式映射
+/** 深空主题边配色：低饱和柔色 */
 const EDGE_STYLES: Record<string, { color: string; animated: boolean; dashed: boolean }> = {
-  Normal:  { color: '#1677ff', animated: false, dashed: false },
-  Retry:   { color: '#fa8c16', animated: true,  dashed: true },
-  Fallback:{ color: '#ff4d4f', animated: true,  dashed: true },
-  Branch:  { color: '#722ed1', animated: true,  dashed: true },
-  Parallel:{ color: '#52c41a', animated: false, dashed: false },
-  Pending: { color: '#fa8c16', animated: true,  dashed: true },
+  Normal:  { color: 'rgba(148,163,184,0.5)', animated: false, dashed: false },
+  Retry:   { color: 'rgba(251,191,36,0.6)',  animated: true,  dashed: true },
+  Fallback:{ color: 'rgba(248,113,113,0.5)', animated: true,  dashed: true },
+  Branch:  { color: 'rgba(167,139,250,0.4)', animated: true,  dashed: true },
+  Parallel:{ color: 'rgba(52,211,153,0.5)',  animated: false, dashed: false },
+  Pending: { color: 'rgba(251,191,36,0.4)',  animated: true,  dashed: true },
 }
 
 export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
@@ -121,7 +121,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       }
 
       const isDegraded = node.type === 'Answer' && node.data?.degraded === true
-      const borderColor = isDegraded ? '#fa8c16' : (isDeprecated ? '#d9d9d9' : colorScheme.border)
+      const borderColor = isDegraded ? '#fa8c16' : (isDeprecated ? 'rgba(100,116,139,0.4)' : colorScheme.border)
 
       const flowNode: Node = {
         id: node.id,
@@ -139,14 +139,22 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
           isDeprecated,
         },
         style: {
-          background: isPending ? '#fafafa' : isDeprecated ? '#f0f0f0' : colorScheme.bg,
-          border: isPending ? `2px dashed ${colorScheme.border}` : isParallel ? `3px solid ${borderColor}` : `2px solid ${borderColor}`,
+          background: isPending ? 'rgba(10,14,31,0.5)' : isDeprecated ? 'rgba(10,14,31,0.5)' : colorScheme.bg,
+          backdropFilter: 'blur(8px)',
+          border: isPending ? `1.5px dashed ${colorScheme.border}` : isParallel ? `2px solid ${borderColor}` : `1.5px solid ${borderColor}`,
           borderRadius: '8px',
           padding: '12px',
           minWidth: '200px',
+          color: '#e6e9f5',
           opacity: isDeprecated ? 0.45 : isPending ? 0.6 : 1,
-          boxShadow: isPending ? 'none' : isDegraded ? '0 0 8px rgba(250,140,22,0.4)' : isDeprecated ? 'inset 0 0 0 2px #d9d9d9' : '0 2px 8px rgba(0,0,0,0.08)',
-          ...(isDeprecated ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)' } : {}),
+          boxShadow: isPending
+            ? `0 0 6px ${colorScheme.border}40`
+            : isDegraded
+              ? '0 0 12px rgba(250,140,22,0.35)'
+              : isDeprecated
+                ? 'inset 0 0 0 1px rgba(100,116,139,0.3)'
+                : `0 0 10px ${borderColor}30, 0 2px 12px rgba(0,0,0,0.4)`,
+          ...(isDeprecated ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 20px)' } : {}),
         },
       }
 
