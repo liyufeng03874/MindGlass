@@ -5,7 +5,7 @@
 - 新：Plan(1) → [ToolCall → Observe(评估) → Plan(N)]* → Answer
 
 Observe 节点做结构化评估（总结/去重/矛盾检测），Plan 节点做决策（sufficient/need_more/terminate）。
-形成真正的 Reason-Act-Observe 决策回环，最多 3 轮。
+形成真正的 Reason-Act-Observe 决策回环，最多 MAX_PLAN_COUNT 轮。
 
 v2.2 新增：流式推送（node_streaming 事件），左侧思考直播。
 设计文档：docs/observe-plan-design.md
@@ -21,6 +21,7 @@ import time
 
 from state.store import ReasoningGraphStore
 from state.models import ReasoningNode, ReasoningEdge
+from agent.config import MAX_PLAN_COUNT
 from agent.planner import plan
 from agent.observer import observe
 from agent.tools import execute_tool
@@ -29,7 +30,6 @@ from agent.answerer import generate_answer
 # 超时设置（秒）
 TOOL_TIMEOUT = 120
 LLM_TIMEOUT = 60
-MAX_PLAN_COUNT = 3
 
 
 def _make_node_id(step_index: int, node_type: str) -> str:
@@ -379,7 +379,7 @@ class ReactLoop:
             ]
         else:
             parts = [f"用户原始问题：{self.query}\n"]
-            parts.append(f"当前是第 {plan_count} 轮规划（最多 3 轮）。\n")
+            parts.append(f"当前是第 {plan_count} 轮规划（最多 {MAX_PLAN_COUNT} 轮）。\n")
             parts.append("=== 各轮检索评估报告 ===")
             for obs in observe_outputs:
                 round_num = obs.get("round", "?")
@@ -399,8 +399,8 @@ class ReactLoop:
                 if new_info:
                     parts.append(f"新增信息：{new_info}")
 
-            if plan_count >= 3:
-                parts.append("\n⚠️ 这是第 3 轮（最后一轮）。如果信息仍然不足，你必须选择 terminate，在 partial_answer_note 中诚实说明哪些方面信息不完整。")
+            if plan_count >= MAX_PLAN_COUNT:
+                parts.append(f"\n⚠️ 这是第 {MAX_PLAN_COUNT} 轮（最后一轮）。如果信息仍然不足，你必须选择 terminate，在 partial_answer_note 中诚实说明哪些方面信息不完整。")
             parts.append("\n请判断信息是否足以回答用户问题，按 JSON 格式输出决策。")
 
             prompt = "\n".join(parts)
@@ -453,17 +453,17 @@ class ReactLoop:
                 raise ValueError("no json found")
             parsed["plan_count"] = plan_count
 
-            # 第 3 轮强制：如果 LLM 仍然返回 need_more，覆盖为 terminate
-            if plan_count >= 3 and parsed.get("decision") == "need_more":
+            # 最后一轮强制：如果 LLM 仍然返回 need_more，覆盖为 terminate
+            if plan_count >= MAX_PLAN_COUNT and parsed.get("decision") == "need_more":
                 parsed["decision"] = "terminate"
-                parsed["reasoning"] = "已达最大检索轮次（3轮），强制终止"
+                parsed["reasoning"] = f"已达最大检索轮次（{MAX_PLAN_COUNT}轮），强制终止"
                 parsed["if_terminate"] = {
                     "reason": "已达最大检索轮次",
                     "partial_answer_note": parsed.get("if_need_more", {}).get("missing_aspects", ["部分信息"])[0] + "方面信息可能不完整",
                 }
             return parsed
         except Exception:
-            if plan_count >= 3:
+            if plan_count >= MAX_PLAN_COUNT:
                 return {
                     "decision": "terminate",
                     "reasoning": "决策解析失败，已达最大轮次，强制终止",

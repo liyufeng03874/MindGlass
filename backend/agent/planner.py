@@ -10,6 +10,7 @@ Plan 节点的两种模式：
 
 import json
 import asyncio
+from agent.config import MAX_PLAN_COUNT
 from agent.llm import generate, generate_stream
 
 # ── 首次规划 Prompt ──
@@ -39,27 +40,27 @@ PLANNING_SYSTEM_PROMPT = """你是一个任务规划专家。给定用户的查�
 """
 
 # ── 决策判断 Prompt ──
-DECISION_SYSTEM_PROMPT = """你是一个信息充足性评估专家。你的任务是根据已收集的结构化评估报告，判断当前信息是否足以回答用户的原始问题。
+DECISION_SYSTEM_PROMPT = f"""你是一个信息充足性评估专家。你的任务是根据已收集的结构化评估报告，判断当前信息是否足以回答用户的原始问题。
 
 你必须严格按以下 JSON 格式返回，不要有其他文字：
-{
+{{
   "decision": "sufficient | need_more | terminate",
   "reasoning": "为什么做这个判断（1-2句话）",
-  "if_need_more": {
+  "if_need_more": {{
     "missing_aspects": ["还缺什么方面"],
     "suggested_queries": ["补搜query1", "补搜query2"]
-  },
-  "if_terminate": {
+  }},
+  "if_terminate": {{
     "reason": "终止原因",
     "partial_answer_note": "以下回答基于有限信息，XX方面可能不完整"
-  },
+  }},
   "plan_count": 2
-}
+}}
 
 判断规则：
 1. **sufficient**（信息充足）：当前收集的 key_findings 已经能完整回答用户问题的每个方面，没有明显缺口
 2. **need_more**（需要补搜）：用户问题的某些方面还没有被覆盖，需要追加搜索。在 suggested_queries 中给出补搜的 query（1-2个），在 missing_aspects 中说明缺什么
-3. **terminate**（强制终止）：仅在 plan_count = 3 且信息仍不足时使用。reason 写"已达最大检索轮次"，partial_answer_note 诚实说明哪些方面信息不完整
+3. **terminate**（强制终止）：仅在 plan_count = {MAX_PLAN_COUNT} 且信息仍不足时使用。reason 写"已达最大检索轮次"，partial_answer_note 诚实说明哪些方面信息不完整
 
 注意：
 - 不要为了补搜而补搜。如果信息已经足够回答问题，直接 sufficient
@@ -132,7 +133,7 @@ async def _decide(query: str, observe_outputs: list[dict], plan_count: int,
                   stream_emit=None, node_id: str = None, node_type: str = "Plan") -> dict:
     """决策判断：根据 Observe 输出判断信息充足性（支持流式）"""
     parts = [f"用户原始问题：{query}\n"]
-    parts.append(f"当前是第 {plan_count} 轮规划（最多 3 轮）。\n")
+    parts.append(f"当前是第 {plan_count} 轮规划（最多 {MAX_PLAN_COUNT} 轮）。\n")
     parts.append("=== 各轮检索评估报告 ===")
 
     for obs in observe_outputs:
@@ -153,9 +154,9 @@ async def _decide(query: str, observe_outputs: list[dict], plan_count: int,
         if new_info:
             parts.append(f"新增信息：{new_info}")
 
-    # 如果是第 3 轮且信息不足，提示 LLM 必须终止
-    if plan_count >= 3:
-        parts.append("\n⚠️ 这是第 3 轮（最后一轮）。如果信息仍然不足，你必须选择 terminate，在 partial_answer_note 中诚实说明哪些方面信息不完整。")
+    # 如果是最后一轮且信息不足，提示 LLM 必须终止
+    if plan_count >= MAX_PLAN_COUNT:
+        parts.append(f"\n⚠️ 这是第 {MAX_PLAN_COUNT} 轮（最后一轮）。如果信息仍然不足，你必须选择 terminate，在 partial_answer_note 中诚实说明哪些方面信息不完整。")
 
     parts.append("\n请判断信息是否足以回答用户问题，按 JSON 格式输出决策。")
 
@@ -180,10 +181,10 @@ async def _decide(query: str, observe_outputs: list[dict], plan_count: int,
         parsed = json.loads(cleaned)
         parsed["plan_count"] = plan_count
 
-        # 第 3 轮强制：如果 LLM 仍然返回 need_more，覆盖为 terminate
-        if plan_count >= 3 and parsed.get("decision") == "need_more":
+        # 最后一轮强制：如果 LLM 仍然返回 need_more，覆盖为 terminate
+        if plan_count >= MAX_PLAN_COUNT and parsed.get("decision") == "need_more":
             parsed["decision"] = "terminate"
-            parsed["reasoning"] = "已达最大检索轮次（3轮），强制终止"
+            parsed["reasoning"] = f"已达最大检索轮次（{MAX_PLAN_COUNT}轮），强制终止"
             parsed["if_terminate"] = {
                 "reason": "已达最大检索轮次",
                 "partial_answer_note": parsed.get("if_need_more", {}).get("missing_aspects", ["部分信息"])[0] + "方面信息可能不完整",
@@ -192,7 +193,7 @@ async def _decide(query: str, observe_outputs: list[dict], plan_count: int,
         return parsed
     except Exception:
         # 解析失败：如果信息看起来够了就 sufficient，否则 terminate
-        if plan_count >= 3:
+        if plan_count >= MAX_PLAN_COUNT:
             return {
                 "decision": "terminate",
                 "reasoning": "决策解析失败，已达最大轮次，强制终止",
