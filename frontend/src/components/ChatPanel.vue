@@ -11,7 +11,8 @@
       <template v-for="item in displayItems" :key="item.id">
         <!-- 消息气泡（用户问题 / 最终回答） -->
         <div v-if="item.kind === 'message'" :class="['message', item.role]">
-          <div class="avatar">{{ item.role === 'user' ? '👤' : '🤖' }}</div>
+          <div class="avatar" v-if="item.role === 'user'">👤</div>
+          <div class="avatar bot-avatar" v-else><MirrorIcon :size="24" /></div>
           <div
             class="bubble"
             v-if="item.role === 'agent'"
@@ -249,7 +250,7 @@
       </template>
 
       <div v-if="loading" class="message agent">
-        <div class="avatar">🤖</div>
+        <div class="avatar bot-avatar"><MirrorIcon :size="24" /></div>
         <div class="bubble thinking">{{ statusText || '正在规划...' }}</div>
       </div>
     </div>
@@ -399,12 +400,15 @@ function highlightLastAnswerBlock() {
   }
 
   // 对 answer block 播放聚焦动画：通过 CSS class 触发
-  // 使用 blockId 来标记动画
+  // 使用 blockId 来标记动画，支持重复触发（先移除再添加，强制重绘）
   const blockId = blocks[answerIdx].id
   // 用 DOM 查找该 block 元素
   nextTick(() => {
     const el = document.querySelector(`[data-block-id="${blockId}"] .thought-content`)
     if (el) {
+      // 先移除旧动画类，强制浏览器重绘后再添加，确保每次点击都能重新触发动画
+      el.classList.remove('answer-block-highlight')
+      void el.offsetWidth  // 强制重绘（reflow）
       el.classList.add('answer-block-highlight')
       setTimeout(() => {
         el.classList.remove('answer-block-highlight')
@@ -792,6 +796,14 @@ const displayItems = computed<DisplayItem[]>(() => {
   align-items: center;
   justify-content: center;
   filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.5));
+}
+
+.bot-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.4));
 }
 
 .bubble {
@@ -1197,6 +1209,24 @@ const displayItems = computed<DisplayItem[]>(() => {
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   transition: background 0.2s;
+  max-height: 120px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167, 139, 250, 0.35) rgba(255, 255, 255, 0.04);
+}
+.result-item::-webkit-scrollbar {
+  width: 6px;
+}
+.result-item::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+}
+.result-item::-webkit-scrollbar-thumb {
+  background: rgba(167, 139, 250, 0.35);
+  border-radius: 3px;
+}
+.result-item::-webkit-scrollbar-thumb:hover {
+  background: rgba(167, 139, 250, 0.6);
 }
 
 .result-item:hover {

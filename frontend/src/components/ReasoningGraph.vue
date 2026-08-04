@@ -511,6 +511,32 @@ watch(
   z-index: 100;
 }
 
+/* 侧边面板 + 废弃弹窗滚动条主题化（与左侧水镜统一） */
+.panel-body,
+.deprecated-body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(167, 139, 250, 0.35) rgba(255, 255, 255, 0.04);
+}
+.panel-body::-webkit-scrollbar,
+.deprecated-body::-webkit-scrollbar {
+  width: 8px;
+}
+.panel-body::-webkit-scrollbar-track,
+.deprecated-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+.panel-body::-webkit-scrollbar-thumb,
+.deprecated-body::-webkit-scrollbar-thumb {
+  background: rgba(167, 139, 250, 0.35);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.panel-body::-webkit-scrollbar-thumb:hover,
+.deprecated-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(167, 139, 250, 0.6);
+}
+
 .panel-open {
   right: 0;
 }
