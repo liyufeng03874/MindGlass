@@ -21,3 +21,7 @@ Thumbs.db
 
 # Admin SQLite DB
 backend/data/*.db
+
+# Moderation fine-tuning artifacts (large files)
+backend/moderation/output/
+backend/moderation/data/
