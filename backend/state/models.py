@@ -105,6 +105,7 @@ class ReasoningMeta:
         self.run_id = run_id
         self.run_started_at: Optional[float] = None  # 本次运行开始时间（秒级时间戳）
         self.plan_count: int = 0  # 当前 Plan 轮次（v2 决策循环）
+        self.interrupted: bool = False  # 本次 run 是否被用户打断
 
     def to_dict(self) -> dict:
         result = {
@@ -113,6 +114,7 @@ class ReasoningMeta:
             "query": self.query,
             "run_id": self.run_id,
             "plan_count": self.plan_count,
+            "interrupted": self.interrupted,
         }
         if self.run_started_at is not None:
             result["run_started_at"] = self.run_started_at

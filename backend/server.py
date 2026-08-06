@@ -2,6 +2,7 @@
 
 import os
 import json
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -21,7 +22,15 @@ from admin.persistence import get_run_snapshot as admin_get_run_snapshot
 # 初始化 admin DB 表结构
 admin_init_db()
 
+# 安全校验模型（启动时加载）
+from moderation.predict import load_model
+
 app = FastAPI(title="MindGlass", description="可观测多步推理 Agent")
+
+@app.on_event("startup")
+def startup_load_models():
+    """启动时加载安全校验模型"""
+    load_model()
 
 # CORS
 app.add_middleware(
@@ -34,6 +43,9 @@ app.add_middleware(
 
 # 全局状态 store（每个 run 独立实例）
 _store = ReasoningGraphStore()
+
+# 当前活跃的 ReactLoop 实例（打断端点用；单 store 天然只有一个活跃 run）
+_active_loop: Optional[ReactLoop] = None
 
 
 @app.get("/api/health")
@@ -63,11 +75,14 @@ async def run_agent(query: str = Query(...)):
 
     async def event_stream():
         """SSE 事件流，run 完成后自动落盘快照"""
+        global _active_loop
+        _active_loop = loop
         try:
             async for event in loop.run(query):
                 yield event
         finally:
-            # SSE 流结束 → run 已完成 → 保存快照
+            _active_loop = None
+            # SSE 流结束 → run 已完成（或被用户打断）→ 保存快照
             try:
                 snapshot = _store.to_dict()
                 if snapshot.get("nodes"):
@@ -77,6 +92,19 @@ async def run_agent(query: str = Query(...)):
                 print(f"[admin] 保存 run 快照失败: {e}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/interrupt")
+def interrupt_run(request: dict):
+    """
+    打断当前运行中的推理。
+    body: { "step_index": 3 }  —— 截断点（保留该节点，之后的节点全部置灰保留）
+    """
+    if _active_loop is None:
+        return {"status": "no_active_run"}
+    step_index = request.get("step_index")
+    _active_loop.request_interrupt(step_index)
+    return {"status": "ok", "cut_step_index": step_index}
 
 
 @app.post("/api/retry")
@@ -93,8 +121,17 @@ def retry_from(request: dict):
     loop = ReactLoop(_store)
 
     async def event_stream():
-        async for event in loop.retry_from(step_index, edited_data):
-            yield event
+        try:
+            async for event in loop.retry_from(step_index, edited_data):
+                yield event
+        finally:
+            # 重试也落盘（upsert 同 run_id），admin 思维重现才能看到重试分支
+            try:
+                snapshot = _store.to_dict()
+                if snapshot.get("nodes"):
+                    admin_save_run(snapshot)
+            except Exception as e:
+                print(f"[admin] 保存 retry 快照失败: {e}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -123,8 +160,16 @@ async def retry_from_graph(request: dict):
     loop = ReactLoop(_store)
 
     async def event_stream():
-        async for event in loop.retry_from_graph(step_index, old_nodes, new_nodes, query, plan_info):
-            yield event
+        try:
+            async for event in loop.retry_from_graph(step_index, old_nodes, new_nodes, query, plan_info):
+                yield event
+        finally:
+            try:
+                snapshot = _store.to_dict()
+                if snapshot.get("nodes"):
+                    admin_save_run(snapshot)
+            except Exception as e:
+                print(f"[admin] 保存 retry_from_graph 快照失败: {e}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

@@ -15,6 +15,7 @@ import asyncio
 import uuid
 import json
 import queue as _queue
+import threading
 from typing import AsyncGenerator, Optional
 from datetime import datetime
 import time
@@ -22,6 +23,7 @@ import time
 from state.store import ReasoningGraphStore
 from state.models import ReasoningNode, ReasoningEdge
 from agent.config import MAX_PLAN_COUNT
+from moderation.predict import check_safety
 from agent.planner import plan
 from agent.observer import observe
 from agent.tools import execute_tool
@@ -89,6 +91,25 @@ class ReactLoop:
         self.step_index = 0
         self._last_node: Optional[ReasoningNode] = None
         self._last_stream_content: str = ""
+        # ── 用户打断（可中断执行）──
+        # 打断标志：线程安全，流式线程与主循环都会检查
+        self._interrupt_event = threading.Event()
+        # 截断点 step_index：截断点之后的节点全部置为 replaced
+        self._cut_step_index: Optional[int] = None
+        # 本次 run 是否已被打断（供 run() 主循环收敛用）
+        self.interrupted = False
+        # 收尾幂等标记：_finalize_interrupt 只发一次 interrupted 事件
+        self._finalized = False
+
+    # ── 打断控制 ──
+
+    def request_interrupt(self, step_index: Optional[int] = None) -> None:
+        """请求打断当前执行。step_index 为截断点（保留该节点，之后的全部置灰）。"""
+        self._cut_step_index = step_index
+        self._interrupt_event.set()
+
+    def _is_interrupted(self) -> bool:
+        return self._interrupt_event.is_set()
 
     # ── 基础设施 ──
 
@@ -115,6 +136,28 @@ class ReactLoop:
         """发送最后一个节点的 SSE 事件"""
         node = self._last_node
         return self._emit("node_complete", {"node": node.to_dict(), "graph": self.store.to_dict()})
+
+    def _finalize_interrupt(self) -> list[str]:
+        """打断收尾：截断点之后的所有节点标记 replaced（置灰保留，不删除），
+        meta 记 interrupted 标记，发送 interrupted 事件供前端收束。
+        幂等：无论被哪个环节调用，只发一次 interrupted 事件。"""
+        if self._finalized:
+            return []
+        self._finalized = True
+        cut = self._cut_step_index if self._cut_step_index is not None else -1
+        for node in self.store.nodes:
+            if node.step_index > cut and node.status not in ("replaced", "branch", "discarded"):
+                node.status = "replaced"
+                if not node.data.get("interrupted"):
+                    node.data["interrupted"] = True
+                    node.label = f"{node.label}（已打断）"
+        self.store.meta.interrupted = True
+        return [
+            self._emit("interrupted", {
+                "cut_step_index": cut,
+                "graph": self.store.to_dict(),
+            }),
+        ]
 
     # ── 流式 LLM 调用（线程池 + Queue） ──
 
@@ -151,6 +194,9 @@ class ReactLoop:
                 )
                 ft = ""
                 for chunk in stream:
+                    # 打断检查：线程内每收一个 chunk 检查一次，触发即停止入队
+                    if self._is_interrupted():
+                        break
                     if chunk.choices and chunk.choices[0].delta.content:
                         token = chunk.choices[0].delta.content
                         ft += token
@@ -166,6 +212,10 @@ class ReactLoop:
         # 消费队列，yield SSE 事件（带超时保护）
         try:
             while True:
+                # 打断检查：主协程侧发现打断立即停止消费，已收文本保留
+                if self._is_interrupted():
+                    self._last_stream_content = full_text
+                    break
                 try:
                     tag, chunk_text, content = q.get_nowait()
                 except _queue.Empty:
@@ -250,7 +300,8 @@ class ReactLoop:
         elif decision == "sufficient":
             label = f"决策：信息充足"
         elif decision == "need_more":
-            label = f"决策：需要补搜"
+            # 首轮决策说“信息不足”，“补搜”只用于第 3 轮及以后（第 2 轮还没“补”过）
+            label = "决策：需要补搜" if plan_count >= 3 else "决策：信息不足"
         elif decision == "terminate":
             label = f"决策：强制终止"
         else:
@@ -268,6 +319,10 @@ class ReactLoop:
                 "plan_count": plan_count,
                 "if_need_more": plan_result.get("if_need_more"),
                 "if_terminate": plan_result.get("if_terminate"),
+                # 安全拦截标志必须随节点持久化：run/retry 主循环从 node.data 回读 plan_result，
+                # 丢了标志会导致 _answer_phase 走普通生成路径（决策说拦截、回答却照常输出的根因）
+                "safety_interrupt": plan_result.get("safety_interrupt"),
+                "safety_confidence": plan_result.get("safety_confidence"),
             },
             status="done",
             step_index=self.step_index,
@@ -380,6 +435,19 @@ class ReactLoop:
         else:
             parts = [f"用户原始问题：{self.query}\n"]
             parts.append(f"当前是第 {plan_count} 轮规划（最多 {MAX_PLAN_COUNT} 轮）。\n")
+            # 加入前序 Plan 节点的决策历史（让后续 Plan 看到前面的决策意图）
+            prev_plan_nodes = [n for n in self.store.nodes if n.type == "Plan" and n.status == "done"]
+            if prev_plan_nodes:
+                parts.append("=== 前序规划决策历史 ===")
+                for i, pn in enumerate(prev_plan_nodes):
+                    pd = pn.data or {}
+                    parts.append(f"\n--- 第 {i+1} 轮规划 ---")
+                    parts.append(f"决策: {pd.get('decision', 'unknown')}")
+                    reasoning = pd.get('reasoning', '')
+                    if reasoning:
+                        parts.append(f"理由: {reasoning[:500]}")
+                parts.append("")
+
             parts.append("=== 各轮检索评估报告 ===")
             for obs in observe_outputs:
                 round_num = obs.get("round", "?")
@@ -402,6 +470,7 @@ class ReactLoop:
             if plan_count >= MAX_PLAN_COUNT:
                 parts.append(f"\n⚠️ 这是第 {MAX_PLAN_COUNT} 轮（最后一轮）。如果信息仍然不足，你必须选择 terminate，在 partial_answer_note 中诚实说明哪些方面信息不完整。")
             parts.append("\n请判断信息是否足以回答用户问题，按 JSON 格式输出决策。")
+            parts.append("重要：你的决策必须与前序规划的安全立场和意图保持一致，不要偏离前序规划已确定的方向。")
 
             prompt = "\n".join(parts)
             messages = [
@@ -415,11 +484,56 @@ class ReactLoop:
         # 流式结束后从实例属性取全文（避开脆弱的字符串匹配）
         full_text = self._last_stream_content
 
+        # 打断处理：把已流出的部分规划内容物化为 replaced 节点，终止本次 run
+        if self._is_interrupted():
+            node = ReasoningNode(
+                node_id=plan_node_id,
+                node_type="Plan",
+                data={
+                    "input": self.query,
+                    "output": full_text,
+                    "reasoning": full_text,
+                    "steps": [],
+                    "decision": None,
+                    "plan_count": plan_count,
+                    "interrupted": True,
+                },
+                status="replaced",
+                step_index=self.step_index,
+                label=("规划" if plan_count == 1 else "决策") + "（已打断）",
+            )
+            self._mark_node_duration(node, plan_start)
+            self._commit_plan_node(node)
+            self._last_node = node
+            self.interrupted = True
+            yield self._emit_last_node()
+            for ev in self._finalize_interrupt():
+                yield ev
+            return
+
         # 解析 JSON
         if plan_count == 1:
             plan_result = self._parse_plan_result(full_text, self.query)
         else:
             plan_result = self._parse_decision_result(full_text, plan_count)
+
+        # BERT 安全校验：对 Plan 的 reasoning 做内容检查（后台线程，不阻塞事件循环）
+        plan_reasoning = plan_result.get("reasoning", "")
+        if plan_reasoning:
+            try:
+                is_safe, conf = await asyncio.to_thread(check_safety, plan_reasoning)
+            except Exception:
+                is_safe, conf = True, 0.0
+            if not is_safe:
+                # Plan 触发安全拦截：强制终止，标记安全中断
+                plan_result["decision"] = "terminate"
+                plan_result["safety_interrupt"] = True
+                plan_result["safety_confidence"] = conf
+                plan_result["reasoning"] = "规划内容触发安全策略，已终止推理流程。"
+                plan_result["if_terminate"] = {
+                    "reason": "安全策略拦截",
+                    "partial_answer_note": "该问题无法回答，内容已被安全策略拦截。",
+                }
 
         # 创建最终 Plan 节点
         plan_node = self._create_plan_node(plan_result, plan_count, plan_start)
@@ -432,7 +546,14 @@ class ReactLoop:
             parsed = _extract_json(text)
             if parsed is None:
                 raise ValueError("no json found")
-            parsed["decision"] = "need_more"
+            # 不再强制 decision=need_more，让 LLM 的原始 decision 生效
+            # 如果 LLM 判断为 terminate（如安全拒绝），直接走 terminate 路径
+            if parsed.get("decision") not in ("need_more", "sufficient", "terminate"):
+                # 如果 steps 为空，说明 LLM 拒绝规划，设为 terminate
+                if not parsed.get("steps"):
+                    parsed["decision"] = "terminate"
+                else:
+                    parsed["decision"] = "need_more"
             parsed["plan_count"] = 1
             return parsed
         except Exception:
@@ -537,6 +658,32 @@ class ReactLoop:
         except Exception:
             # 超时或其他异常，用原始结果生成简单摘要
             full_text = None
+
+        # 打断处理：把已流出的部分评估内容物化为 replaced 节点，终止本次 run
+        if self._is_interrupted():
+            obs_node = self._create_observe_node(
+                {
+                    "round": round_num,
+                    "summary": full_text or "",
+                    "key_findings": [],
+                    "conflicts": [],
+                    "duplicates_removed": 0,
+                    "interrupted": True,
+                },
+                source_ids=list(self._last_tc_node_ids),
+                start_time=obs_start,
+            )
+            obs_node.status = "replaced"
+            obs_node.label = f"评估（第{round_num}轮）（已打断）"
+            self.store.add_node(obs_node)
+            for tc_id in self._last_tc_node_ids:
+                self._add_edge(tc_id, obs_node.id)
+            self._last_node = obs_node
+            self.interrupted = True
+            yield self._emit_last_node()
+            for ev in self._finalize_interrupt():
+                yield ev
+            return
 
         # 解析 JSON（健壮提取：去围栏 + 截取最外层 {}）
         if full_text:
@@ -652,28 +799,113 @@ class ReactLoop:
             {"role": "user", "content": prompt},
         ]
 
-        # 流式调用 LLM
+        # 流式调用 LLM（带安全校验）
+        # 安全校验放后台线程：GPU 争用（如训练任务在跑）时绝不能阻塞事件循环，
+        # 否则 /api/interrupt 请求会排队，用户点“截断”收不到响应
         full_text = ""
+        last_check_len = 0  # 上次检查时的文本长度
+        safety_triggered = False
+        safety_conf = 0.0
+        CHECK_INTERVAL = 100  # 每 100 字检查一次
+        pending_check = None  # 后台安全检查 future（同一时刻最多一个在跑）
+        loop = asyncio.get_running_loop()
+
         try:
             async for event in self._stream_llm(answer_node_id, "Answer", messages):
+                # 打断检查最高优先：用户点了截断 → 立即停
+                if self._is_interrupted():
+                    break
+                # 解析 chunk 累计文本
+                event_data = json.loads(event.split("data: ")[1].strip()) if "data: " in event else None
+                if event_data and event_data.get("type") == "node_streaming":
+                    content = event_data["data"].get("content", "")
+                    # 回收已完成的后台检查结果
+                    if pending_check is not None and pending_check.done():
+                        try:
+                            is_safe, conf = pending_check.result()
+                        except Exception:
+                            is_safe, conf = True, 0.0
+                        pending_check = None
+                        if not is_safe:
+                            # 触发安全中断
+                            safety_triggered = True
+                            safety_conf = conf
+                            full_text = content
+                            # 发送安全中断事件
+                            yield self._emit("safety_interrupt", {
+                                "text": "很抱歉，该回答包含不合规内容，已被安全策略拦截。",
+                                "confidence": conf,
+                            })
+                            break
+                    # 每 100 字发起一次检查：丢到后台线程，不阻塞流式主路径
+                    if pending_check is None and len(content) - last_check_len >= CHECK_INTERVAL:
+                        last_check_len = len(content)
+                        pending_check = loop.run_in_executor(None, check_safety, content)
                 yield event
-            full_text = self._last_stream_content or full_text
+
+            # 流式结束后：等最后一个检查结果（被打断则不等）
+            if not self._is_interrupted() and not safety_triggered and pending_check is not None:
+                try:
+                    is_safe, conf = await pending_check
+                except Exception:
+                    is_safe, conf = True, 0.0
+                if not is_safe:
+                    safety_triggered = True
+                    safety_conf = conf
+                    yield self._emit("safety_interrupt", {
+                        "text": "很抱歉，该回答包含不合规内容，已被安全策略拦截。",
+                        "confidence": conf,
+                    })
+
+            if not safety_triggered:
+                full_text = self._last_stream_content or full_text
         except Exception:
             full_text = f"回答生成超时（{LLM_TIMEOUT}s），请重试。"
 
-        # 降级模式：在回答前加提示信息
-        if degraded and plan_decision:
-            note = plan_decision.get("if_terminate", {}).get(
-                "partial_answer_note",
-                "部分信息可能不完整，建议进一步查证。"
+        # 打断处理：把已流出的部分回答物化为 replaced 节点，发 interrupted 事件收束前端，终止本次 run
+        if self._is_interrupted():
+            prev_id = self._prev_node_id()
+            ans_node = self._create_answer_node(
+                self.query, full_text, len(observe_outputs), degraded, answer_start,
             )
-            full_text = ANSWER_DEGRADED_PREFIX.format(note=note) + full_text
+            ans_node.status = "replaced"
+            ans_node.label = "最终回答（已打断）"
+            ans_node.data["interrupted"] = True
+            self.store.add_node(ans_node)
+            if prev_id:
+                self._add_edge(prev_id, ans_node.id)
+            self._last_node = ans_node
+            self.interrupted = True
+            yield self._emit_last_node()
+            for ev in self._finalize_interrupt():
+                yield ev
+            return
+
+        # 安全中断时创建特殊标记的 Answer 节点
+        if safety_triggered:
+            full_text = "很抱歉，该回答包含不合规内容，已被安全策略拦截。"
+        else:
+            # 降级模式：在回答前加提示信息
+            if degraded and plan_decision:
+                note = plan_decision.get("if_terminate", {}).get(
+                    "partial_answer_note",
+                    "部分信息可能不完整，建议进一步查证。"
+                )
+                full_text = ANSWER_DEGRADED_PREFIX.format(note=note) + full_text
 
         # 创建 Answer 节点
         prev_id = self._prev_node_id()
         ans_node = self._create_answer_node(
             self.query, full_text, len(observe_outputs), degraded, answer_start,
         )
+        
+        # 安全中断时添加特殊标记
+        if safety_triggered:
+            ans_node.status = "safety_interrupted"
+            ans_node.data["safety_interrupt"] = True
+            ans_node.data["safety_confidence"] = safety_conf
+            ans_node.label = "安全拦截"
+        
         self.store.add_node(ans_node)
         if prev_id:
             self._add_edge(prev_id, ans_node.id)
@@ -700,7 +932,55 @@ class ReactLoop:
 
         yield self._emit("run_complete", {"graph": self.store.to_dict()})
 
+    # ── Answer 阶段（统一安全分支 + 流式回答）──
+
+    async def _answer_phase(self, observe_outputs: list[dict], plan_decision: dict) -> AsyncGenerator[str, None]:
+        """run/retry 共用出口：Plan 触发安全拦截时直接出安全 Answer，否则流式生成回答。
+        避免 retry 路径漏掉 safety_interrupt 分支导致行为与 run 不一致。"""
+        if plan_decision.get("safety_interrupt"):
+            safety_text = "很抱歉，该问题涉及不合规内容，无法提供回答。"
+            ans_node = self._create_answer_node(
+                self.query, safety_text, len(observe_outputs), False, time.time(),
+            )
+            ans_node.status = "safety_interrupted"
+            ans_node.data["safety_interrupt"] = True
+            ans_node.data["safety_confidence"] = plan_decision.get("safety_confidence", 0)
+            ans_node.label = "安全拦截"
+            prev_id = self._prev_node_id()
+            self.store.add_node(ans_node)
+            if prev_id:
+                self._add_edge(prev_id, ans_node.id)
+            self._last_node = ans_node
+            yield self._emit("safety_interrupt", {
+                "text": safety_text,
+                "confidence": plan_decision.get("safety_confidence", 0),
+            })
+            yield self._emit_last_node()
+            yield self._emit("run_complete", {"graph": self.store.to_dict()})
+        else:
+            degraded = plan_decision.get("decision") == "terminate"
+            async for event in self._stream_answer(observe_outputs, plan_decision, degraded):
+                yield event
+
     # ── 工具执行 ──
+
+    def _emit_tool_complete(self, node: ReasoningNode, tool_name: str, params: dict, result) -> str:
+        """ToolCall 完成事件：node+graph 之外，顶层带 tool_name/params/result_preview/result_full，
+        前端左侧人读视图依赖这些顶层字段（retry 路径之前漏带，导致显示“无结果”）。"""
+        if isinstance(result, dict):
+            result_preview = json.dumps(result, ensure_ascii=False)[:4000]
+            result_full = json.dumps(result, ensure_ascii=False)
+        else:
+            result_preview = str(result)[:4000]
+            result_full = str(result)
+        return self._emit("node_complete", {
+            "node": node.to_dict(),
+            "graph": self.store.to_dict(),
+            "tool_name": tool_name,
+            "params": params,
+            "result_preview": result_preview,
+            "result_full": result_full,
+        })
 
     async def _execute_tools(self, steps: list[dict]) -> AsyncGenerator[str, None]:
         """
@@ -731,7 +1011,24 @@ class ReactLoop:
             ok, res = await self._safe_tool_call(tn, tp)
             return s, ok, res
 
-        results = await asyncio.gather(*[_exec(s) for s in steps])
+        tasks = [asyncio.create_task(_exec(s)) for s in steps]
+        # 轮询等待：打断信号到达时取消尚未完成的工具调用，不再干等
+        while True:
+            if self._is_interrupted():
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                break
+            if all(t.done() for t in tasks):
+                break
+            await asyncio.sleep(0.1)
+
+        results = []
+        for s, t in zip(steps, tasks):
+            try:
+                results.append(t.result())
+            except (asyncio.CancelledError, Exception):
+                results.append((s, False, {"error": "工具执行被用户打断"}))
 
         # 按原始顺序创建节点
         for s, ok, res in results:
@@ -749,26 +1046,7 @@ class ReactLoop:
             self._last_tc_node_ids.append(tc_node.id)
 
             # 补强 node_complete 事件：带 tool_name、params、result_preview、result_full
-            tool_name = s.get("tool", "search")
-            params = s.get("params", {})
-            # 结果预览：截断 4000 字（任务⑦：500 → 4000，让左侧能看到更多内容）
-            if isinstance(res, dict):
-                result_preview = json.dumps(res, ensure_ascii=False)[:4000]
-                # 完整结果 JSON 字符串——左侧人读视图直接用它，避免截断
-                result_full = json.dumps(res, ensure_ascii=False)
-            else:
-                result_preview = str(res)[:4000]
-                result_full = str(res)
-
-            yield self._emit("node_complete", {
-                "node": tc_node.to_dict(),
-                "graph": self.store.to_dict(),
-                # 新增：前端左侧展示用
-                "tool_name": tool_name,
-                "params": params,
-                "result_preview": result_preview,
-                "result_full": result_full,
-            })
+            yield self._emit_tool_complete(tc_node, s.get("tool", "search"), s.get("params", {}), res)
 
     # ── 主循环 ──
 
@@ -793,6 +1071,10 @@ class ReactLoop:
         yield self._emit("status", {"message": "🤔 正在规划..."})
         async for event in self._stream_plan(1, []):
             yield event
+        if self._is_interrupted():
+            for ev in self._finalize_interrupt():
+                yield ev
+            return
         plan_count = 1
 
         # 获取最后一次 Plan 节点
@@ -827,11 +1109,19 @@ class ReactLoop:
             # 执行工具
             async for event in self._execute_tools(steps):
                 yield event
+            if self._is_interrupted():
+                for ev in self._finalize_interrupt():
+                    yield ev
+                return
             self.step_index += 1
 
             # Observe：结构化评估（流式）
             async for event in self._stream_observe(observe_outputs):
                 yield event
+            if self._is_interrupted():
+                for ev in self._finalize_interrupt():
+                    yield ev
+                return
             self.step_index += 1
 
             # 重新规划（决策）（流式）
@@ -839,6 +1129,10 @@ class ReactLoop:
             yield self._emit("status", {"message": f"🤔 第 {plan_count} 轮决策..."})
             async for event in self._stream_plan(plan_count, observe_outputs):
                 yield event
+            if self._is_interrupted():
+                for ev in self._finalize_interrupt():
+                    yield ev
+                return
             self.step_index += 1
 
             # 获取最新 Plan 节点更新 plan_result
@@ -850,9 +1144,8 @@ class ReactLoop:
             # 更新 meta
             self.store.meta.plan_count = plan_count
 
-        # ── 终止 → Answer（流式） ──
-        degraded = plan_result.get("decision") == "terminate"
-        async for event in self._stream_answer(observe_outputs, plan_result, degraded):
+        # ── 终止 → Answer（流式，含安全分支）──
+        async for event in self._answer_phase(observe_outputs, plan_result):
             yield event
 
     # ── 截断重放 ──
@@ -895,10 +1188,19 @@ class ReactLoop:
                     effective_tool = edited_data["tool"]
                 yield self._emit("status", {"message": f"📝 已更新参数: {json.dumps(effective_params, ensure_ascii=False)}"})
 
-            # 重新执行工具
+            # 重新执行工具（可被用户打断）
             yield self._emit("status", {"message": f"🔧 重新执行: {effective_tool}"})
             retry_start = time.time()
-            success, tool_result = await self._safe_tool_call(effective_tool, effective_params)
+            tool_task = asyncio.create_task(self._safe_tool_call(effective_tool, effective_params))
+            while not tool_task.done():
+                if self._is_interrupted():
+                    tool_task.cancel()
+                    break
+                await asyncio.sleep(0.1)
+            if tool_task.cancelled() or not tool_task.done():
+                success, tool_result = False, {"error": "工具执行被用户打断"}
+            else:
+                success, tool_result = tool_task.result()
 
             tc_node = self._create_toolcall_node(
                 {"tool": effective_tool, "params": effective_params, "description": effective_description},
@@ -910,7 +1212,7 @@ class ReactLoop:
             if prev_id:
                 self._add_edge(prev_id, tc_node.id)
             self._last_node = tc_node
-            yield self._emit_last_node()
+            yield self._emit_tool_complete(tc_node, effective_tool, effective_params, tool_result)
 
             # Observe（流式）
             self._last_raw_results = [tool_result]
@@ -918,6 +1220,8 @@ class ReactLoop:
             self.step_index += 1
             async for event in self._stream_observe(observe_outputs):
                 yield event
+            if self.interrupted:
+                return
             self.step_index += 1
 
             # 重新决策（流式）
@@ -928,6 +1232,8 @@ class ReactLoop:
             yield self._emit("status", {"message": f"🤔 第 {plan_count} 轮决策..."})
             async for event in self._stream_plan(plan_count, observe_outputs):
                 yield event
+            if self.interrupted:
+                return
             self.step_index += 1
             self.store.meta.plan_count = plan_count
 
@@ -944,23 +1250,28 @@ class ReactLoop:
                 steps = [{"tool": "search", "description": q, "params": {"query": q}} for q in queries]
                 async for event in self._execute_tools(steps):
                     yield event
+                if self.interrupted:
+                    return
                 self.step_index += 1
                 async for event in self._stream_observe(observe_outputs):
                     yield event
+                if self.interrupted:
+                    return
                 self.step_index += 1
 
                 # 再次决策（流式）
                 plan_count += 1
                 async for event in self._stream_plan(plan_count, observe_outputs):
                     yield event
+                if self.interrupted:
+                    return
                 self.step_index += 1
 
-            degraded = plan_result.get("decision") == "terminate"
             for n in reversed(self.store.nodes):
                 if n.type == "Plan":
                     plan_result = n.data
                     break
-            async for event in self._stream_answer(observe_outputs, plan_result, degraded):
+            async for event in self._answer_phase(observe_outputs, plan_result):
                 yield event
 
         elif node.type == "Plan":
@@ -977,22 +1288,27 @@ class ReactLoop:
             if steps:
                 async for event in self._execute_tools(steps):
                     yield event
+                if self.interrupted:
+                    return
                 self.step_index += 1
                 async for event in self._stream_observe(observe_outputs):
                     yield event
+                if self.interrupted:
+                    return
                 self.step_index += 1
 
             plan_count = 2
             async for event in self._stream_plan(plan_count, observe_outputs):
                 yield event
+            if self.interrupted:
+                return
             self.step_index += 1
 
             for n in reversed(self.store.nodes):
                 if n.type == "Plan":
                     plan_result = n.data
                     break
-            degraded = plan_result.get("decision") == "terminate"
-            async for event in self._stream_answer(observe_outputs, plan_result, degraded):
+            async for event in self._answer_phase(observe_outputs, plan_result):
                 yield event
 
         elif node.type == "Observe":
@@ -1010,14 +1326,15 @@ class ReactLoop:
 
             async for event in self._stream_plan(plan_count, observe_outputs):
                 yield event
+            if self.interrupted:
+                return
             self.step_index += 1
 
             for n in reversed(self.store.nodes):
                 if n.type == "Plan":
                     plan_result = n.data
                     break
-            degraded = plan_result.get("decision") == "terminate"
-            async for event in self._stream_answer(observe_outputs, plan_result, degraded):
+            async for event in self._answer_phase(observe_outputs, plan_result):
                 yield event
 
         else:
@@ -1076,7 +1393,16 @@ class ReactLoop:
 
             yield self._emit("status", {"message": f"🔧 重新执行: {tool_name}"})
             retry_start = time.time()
-            success, tool_result = await self._safe_tool_call(tool_name, params)
+            tool_task = asyncio.create_task(self._safe_tool_call(tool_name, params))
+            while not tool_task.done():
+                if self._is_interrupted():
+                    tool_task.cancel()
+                    break
+                await asyncio.sleep(0.1)
+            if tool_task.cancelled() or not tool_task.done():
+                success, tool_result = False, {"error": "工具执行被用户打断"}
+            else:
+                success, tool_result = tool_task.result()
 
             tc_data = {
                 "tool": tool_name,
@@ -1100,7 +1426,7 @@ class ReactLoop:
             if prev_id:
                 self._add_edge(prev_id, tc_node.id)
             self._last_node = tc_node
-            yield self._emit_last_node()
+            yield self._emit_tool_complete(tc_node, tool_name, params, tool_result)
 
             self._last_raw_results.append(tool_result)
             self._last_tc_node_ids.append(tc_node.id)
@@ -1109,6 +1435,8 @@ class ReactLoop:
         self.step_index += 1
         async for event in self._stream_observe(observe_outputs):
             yield event
+        if self.interrupted:
+            return
         self.step_index += 1
 
         # ── 6. 重新决策（流式） ──
@@ -1119,14 +1447,15 @@ class ReactLoop:
         yield self._emit("status", {"message": f"🤔 第 {plan_count} 轮决策..."})
         async for event in self._stream_plan(plan_count, observe_outputs):
             yield event
+        if self.interrupted:
+            return
         self.step_index += 1
 
         for n in reversed(self.store.nodes):
             if n.type == "Plan":
                 plan_result = n.data
                 break
-        degraded = plan_result.get("decision") == "terminate"
-        async for event in self._stream_answer(observe_outputs, plan_result, degraded):
+        async for event in self._answer_phase(observe_outputs, plan_result):
             yield event
 
     # ── 辅助 ──
