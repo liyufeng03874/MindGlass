@@ -187,7 +187,7 @@
                 <div
                   v-for="block in blockGroup.blocks"
                   :key="'pb-' + block.id"
-                  class="thought-block thought-toolcall parallel-card"
+                  :class="['thought-block', 'thought-toolcall', 'parallel-card', { 'phase-cut': block.phase === 'cut', 'phase-retry': block.phase === 'retry' }]"
                 >
                   <div class="thought-header">
                     <span class="thought-title" :class="{ 'is-loading': block.status === 'loading' }">

@@ -339,6 +339,33 @@ export function useAgentGraph() {
           if (block.status === 'loading') block.status = 'done'
           if (interruptedIds.has(block.nodeId)) block.phase = 'cut'
         }
+        // 未流式过的废弃节点（如被打断时还没出现的决策/回答）补成置灰 block，
+        // 让左侧聊天完整呈现"被打断侧"的后续链（问题2）
+        const existingIds = new Set(leftBlocks.value.map(b => b.nodeId))
+        const missedNodes = ((event.data.graph?.nodes as any[]) || [])
+          .filter((n: any) => (n.status === 'replaced' || n.status === 'branch')
+            && !existingIds.has(n.id)
+            && ['Plan', 'Observe', 'Answer', 'ToolCall'].includes(n.type))
+          .sort((a: any, b: any) => (a.step_index ?? 0) - (b.step_index ?? 0))
+        for (const n of missedNodes) {
+          leftBlocks.value.push({
+            id: `block_${n.id}`,
+            nodeId: n.id,
+            type: nodeTypeToBlockType(n.type),
+            status: 'done',
+            title: n.label || BLOCK_TITLES[n.type] || n.type,
+            content: '',
+            phase: 'cut',
+            metadata: n.type === 'ToolCall' && n.data?.result !== undefined
+              ? {
+                  toolName: n.data?.tool || '',
+                  params: n.data?.params,
+                  resultPreview: '',
+                  resultFull: typeof n.data.result === 'string' ? n.data.result : JSON.stringify(n.data.result),
+                }
+              : undefined,
+          })
+        }
         // 分割线：打断边界
         leftBlocks.value.push({
           id: `divider_cut_${Date.now()}`,

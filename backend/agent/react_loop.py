@@ -124,6 +124,16 @@ class ReactLoop:
                 return node.id
         return None
 
+    def _restore_branch_display_edges(self, node) -> None:
+        """补回废弃链展示边：废弃工具 → 同 step+1 的废弃评估。
+        打断时 prune 删过 done→废弃评估 的边（当时还不知道它会变 branch），
+        并行重试标 branch 时补回，保证废弃链在图上是完整的一截。"""
+        for tgt in self.store.nodes:
+            if (tgt.type == "Observe" and tgt.step_index == node.step_index + 1
+                    and tgt.status in ("replaced", "branch")):
+                if not any(e.from_id == node.id and e.to_id == tgt.id for e in self.store.edges):
+                    self._add_edge(node.id, tgt.id, "Branch")
+
     def _prune_stale_sibling_edges(self) -> None:
         """打断/截断后立刻断开"存活工具节点 → 已废弃评估节点"的旧边。
         存活(done)的兄弟 ToolCall 不应指向 replaced/branch 的 Observe；
@@ -1372,6 +1382,8 @@ class ReactLoop:
                 existing.data["branch"] = True
                 existing.label = f"{node_data.get('label', node_data['type'])}（废弃）"
                 branch_ids.add(existing.id)
+                # 补回废弃链展示边（问题1）
+                self._restore_branch_display_edges(existing)
                 yield self._emit("node_complete", {"node": existing.to_dict(), "graph": self.store.to_dict()})
 
         # ── 2. 级联标记 replaced ──
