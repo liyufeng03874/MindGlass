@@ -563,3 +563,54 @@ fix(backend): 最大规划轮数3→5抽常量 MAX_PLAN_COUNT 统一引用
 - P1 人读视图视觉效果需哥哥在浏览器中验收
 - T1 后端改动需重启 8001 服务生效
 - T2 聚焦动画在 demo 加载场景（无 leftBlocks）下会回退到 highlightLastMessage（兼容行为）
+
+---
+
+## 任务⑧修复记录（哥哥验收任务⑦反馈的两修）
+
+> commit: `864c83f`
+> 分支: `feature/water-mirror-live`
+> 日期: 2026-08-04
+
+### Bug 1：toolcall 人读视图未生效
+
+**根因**：
+1. 展开按钮条件只检查 `resultPreview`：`v-if="(block.metadata?.resultPreview ?? '') !== ''"`——当 `resultFull` 有值但 `resultPreview` 为空时，按钮不显示、内容区为空
+2. 并行组卡片与单列卡片的回退原文分支是两处独立的 template，未统一使用同一个读取函数
+
+**修复**：
+- 抽 `getToolRawText(block)` 函数：统一返回 `resultFull || resultPreview || ''`
+- 单列 toolcall + 并行组卡片的展开按钮、回退原文展示全部改用 `getToolRawText`
+- 回退分支增加状态区分：`done` 显示"无结果"，`loading` 显示"等待结果..."
+
+### Bug 2：最终回答重复渲染
+
+**根因**：Answer 节点完成时：
+1. `node_streaming` → 在 `leftBlocks` 创建 answer block
+2. `node_complete` → 推入 `messages`（agent 消息气泡）
+3. `displayItems` 同时渲染 answer block 和 agent message → 重复出现
+
+**修复**：
+- `blockGroups` computed 增加过滤：当 `messages` 中已有 agent 消息时，过滤掉 answer 类型的 block
+- answer 内容仅由 agent message bubble 展示，不再在思考直播区重复
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `frontend/src/components/ChatPanel.vue` | +24行 -8行：新增 `getToolRawText` 函数；统一单列/并行组 toolcall 展开按钮和回退原文条件；`blockGroups` 过滤 answer block 去重 |
+
+### 验证
+
+- ✅ `npm run build` 通过（130 modules, 549ms）
+- ✅ git commit: `864c83f fix(frontend): toolcall人读视图修复+最终回答去重`
+- ⚠️ 无后端改动，无需重启 8001
+
+---
+### 2026-08-04 仓库清理 + push 尝试
+- .gitignore 添加了 backend/moderation/output/ 和 backend/moderation/data/
+- git rm -r --cached 已移除追踪，git filter-branch 已重写历史（86 commits，清除了 moderation 大文件）
+- commit: c84276b / 030409a chore: remove large moderation artifacts from tracking
+- git status 干净（仅 water-mirror-live-notes.md 修改）
+- push 失败：GitHub HTTPS 连接不可达（connection reset / port 443 无法连接），本地网络问题
+- 本地仓库已清理干净，网络恢复后执行：git push --force-with-lease origin feature/water-mirror-live
