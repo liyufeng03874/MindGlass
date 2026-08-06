@@ -124,6 +124,18 @@ class ReactLoop:
                 return node.id
         return None
 
+    def _prune_stale_sibling_edges(self) -> None:
+        """打断/截断后立刻断开"存活工具节点 → 已废弃评估节点"的旧边。
+        存活(done)的兄弟 ToolCall 不应指向 replaced/branch 的 Observe；
+        新 Observe 诞生时 fix2 会把它连到新评估节点。"""
+        def _stale(e):
+            src = self.store.get_node_by_id(e.from_id)
+            tgt = self.store.get_node_by_id(e.to_id)
+            return (src is not None and tgt is not None
+                    and src.type == "ToolCall" and src.status == "done"
+                    and tgt.type == "Observe" and tgt.status in ("replaced", "branch"))
+        self.store.edges = [e for e in self.store.edges if not _stale(e)]
+
     def _add_edge(self, from_id: str, to_id: str, edge_type: str = "Normal") -> None:
         """添加边"""
         self.store.add_edge(ReasoningEdge(from_id=from_id, to_id=to_id, edge_type=edge_type))
@@ -152,6 +164,8 @@ class ReactLoop:
                     node.data["interrupted"] = True
                     node.label = f"{node.label}（已打断）"
         self.store.meta.interrupted = True
+        # 打断后立刻断开存活工具节点→已废弃评估节点的旧边（问题4）
+        self._prune_stale_sibling_edges()
         return [
             self._emit("interrupted", {
                 "cut_step_index": cut,
@@ -1377,6 +1391,9 @@ class ReactLoop:
                         replaced_ids.add(target.id)
                         yield self._emit("node_complete", {"node": target.to_dict(), "graph": self.store.to_dict()})
                         to_visit.append(target.id)
+
+        # 级联废弃后断开存活工具节点→已废弃评估节点的旧边（问题4）
+        self._prune_stale_sibling_edges()
 
         # ── 3. 收集截断前的 observe_outputs ──
         observe_outputs = self._collect_observe_outputs_before(step_index)

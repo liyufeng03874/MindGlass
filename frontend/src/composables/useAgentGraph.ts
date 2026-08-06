@@ -247,13 +247,25 @@ export function useAgentGraph() {
             leftBlocks.value.push(block)
           } else {
             block.status = node.status === 'error' ? 'error' : 'done'
+            // 后端补发 node_complete（branch/replaced 标记等）时不带 result 字段，
+            // 空值不能覆盖已有结果，否则已有结果的卡片会退化成"无结果"（问题2）
             block.metadata = {
-              toolName,
-              params,
-              resultPreview,
-              resultFull,
+              toolName: toolName || block.metadata?.toolName || '',
+              params: params ?? block.metadata?.params,
+              resultPreview: resultPreview || block.metadata?.resultPreview || '',
+              resultFull: resultFull || block.metadata?.resultFull || '',
             }
           }
+          // 废弃节点（branch/replaced/discarded）在左侧聊天置灰（问题2）
+          if (node.status === 'branch' || node.status === 'replaced' || node.status === 'discarded') {
+            block.phase = 'cut'
+          }
+        }
+
+        // 非 ToolCall 节点（observe/plan/answer）废弃时同样置灰对应 block（问题2）
+        if (node.status === 'branch' || node.status === 'replaced' || node.status === 'discarded') {
+          const anyBlock = leftBlocks.value.find((bb: LeftBlock) => bb.id === `block_${node.id}`)
+          if (anyBlock) anyBlock.phase = 'cut'
         }
 
         // v2 预测逻辑：
@@ -316,10 +328,11 @@ export function useAgentGraph() {
         if (event.data.graph) {
           graph.value = event.data.graph as ReasoningGraph
         }
-        // 左侧还在 loading 的流式 block 标记结束；被打断侧的 block 标记 phase=cut
+        // 左侧还在 loading 的流式 block 标记结束；被废弃的 block 标记 phase=cut（置灰）
         const interruptedIds = new Set(
           ((event.data.graph?.nodes as any[]) || [])
-            .filter((n: any) => n.data?.interrupted)
+            .filter((n: any) => n.data?.interrupted
+              || n.status === 'replaced' || n.status === 'branch' || n.status === 'discarded')
             .map((n: any) => n.id)
         )
         for (const block of leftBlocks.value) {
@@ -535,16 +548,9 @@ export function useAgentGraph() {
 
   /** 方案 C：并行重试——被编辑的旧节点废弃推远，新节点占原位 */
   async function retryFromGraph(stepIndex: number, originalNode: any, editedData?: Record<string, any>) {
+    // 分割线由 retryFrom 统一推（并行重试也会经过 retryFrom），这里不重复推
     cutNode.value = null
     inRetryBranch = true
-    leftBlocks.value.push({
-      id: `divider_retry_${Date.now()}`,
-      nodeId: '',
-      type: 'divider',
-      status: 'done',
-      title: '🔄 重试分支',
-      content: '',
-    })
     status.value = '🔄 正在并行重试...'
     connected.value = true
     isRunning.value = true

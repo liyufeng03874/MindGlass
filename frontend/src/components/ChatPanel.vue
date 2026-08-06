@@ -80,7 +80,7 @@
                             </li>
                           </ol>
                         </div>
-                        <div v-if="parsedBlockContent(blockGroup.single)?.decision" class="readable-section">
+                        <div v-if="parsedBlockContent(blockGroup.single)?.decision && planRound(blockGroup.single) > 1" class="readable-section">
                           <div class="readable-label">🎯 决策</div>
                           <span class="decision-badge" :class="`decision-${getDecision(blockGroup.single)}`">
                             {{ getDecisionLabel(blockGroup.single) }}
@@ -638,8 +638,17 @@ function getDecision(block: LeftBlock): string {
   return parsed?.decision || ''
 }
 
+function planRound(block: LeftBlock): number {
+  const plans = (props.leftBlocks || []).filter(b => b.type === 'plan')
+  return plans.findIndex(b => b.id === block.id) + 1
+}
+
 function getDecisionLabel(block: LeftBlock): string {
   const d = getDecision(block)
+  // 措辞与图一致：第 2 轮（首次决策）叫"信息不足"，第 3 轮起才叫"需要补搜"（问题1）
+  if (d === 'need_more') {
+    return planRound(block) >= 3 ? '🔍 需要补搜' : '❓ 信息不足'
+  }
   return decisionLabels[d] || d
 }
 
