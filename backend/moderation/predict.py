@@ -1,153 +1,61 @@
-"""
-预测模块
-加载训练好的 checkpoint，对输入文本进行合规性分类。
-输出: {label: int, label_name: str, confidence: float}
-"""
-
+"""安全校验模块 - BERT 内容安全检查"""
 import os
-from pathlib import Path
-from typing import Optional
-
 import torch
-import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+# 模型路径
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "output", "checkpoint", "final")
 
-# 默认 checkpoint 路径（训练产出）
-DEFAULT_CHECKPOINT = os.environ.get(
-    "MODERATION_CHECKPOINT",
-    str(Path(__file__).parent / "output" / "checkpoint" / "final"),
-)
-
-# 标签映射
-LABEL_MAP = {0: "合规", 1: "不合规"}
+# 全局模型实例
+_model = None
+_tokenizer = None
+_device = None
 
 
-def load_moderation_model(
-    checkpoint_path: str = DEFAULT_CHECKPOINT,
-    model_path: Optional[str] = None,
-    device: str = "cpu",
-):
+def load_model():
+    """加载安全校验模型（启动时调用一次）"""
+    global _model, _tokenizer, _device
+    
+    try:
+        _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        _tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
+        _model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH, local_files_only=True)
+        _model.to(_device)
+        _model.eval()
+        print(f"[OK] 安全校验模型加载成功，设备: {_device}")
+        return True
+    except Exception as e:
+        print(f"[WARN] 安全校验模型加载失败: {e}")
+        _model = None
+        _tokenizer = None
+        _device = None
+        return False
+
+
+def check_safety(text: str) -> tuple[bool, float]:
     """
-    加载训练好的模型和 tokenizer。
-    
-    参数:
-        checkpoint_path: 训练产出的 checkpoint 目录（含 config.json + pytorch_model.bin）
-        model_path: 若指定则覆盖 checkpoint_path
-        device: 推理设备
-    
-    返回:
-        (model, tokenizer)
+    检查文本是否安全
+    返回: (is_safe, confidence)
+    - is_safe: True=安全, False=违规
+    - confidence: 模型置信度 (0-1)
     """
-    path = model_path or checkpoint_path
+    if _model is None or _tokenizer is None:
+        # 模型未加载，降级为全部放行
+        return True, 0.0
     
-    print(f"📂 加载模型: {path}")
-    tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
-    model = AutoModelForSequenceClassification.from_pretrained(
-        path,
-        local_files_only=True,
-    )
-    model = model.to(device)
-    model.eval()
-    print(f"✅ 模型加载成功，设备: {device}")
+    # 截断到 512 字符（BERT 输入限制）
+    text_to_check = text[:512] if len(text) > 512 else text
     
-    return model, tokenizer
-
-
-def predict_text(
-    text: str,
-    model=None,
-    tokenizer=None,
-    checkpoint_path: str = DEFAULT_CHECKPOINT,
-    device: str = "cpu",
-    max_length: int = 128,
-) -> dict:
-    """
-    对单条文本进行合规性分类。
+    inputs = _tokenizer(text_to_check, return_tensors="pt", truncation=True, max_length=512, padding=True)
+    inputs = {k: v.to(_device) for k, v in inputs.items()}
     
-    参数:
-        text: 输入文本
-        model: 已加载的模型（None 则自动加载）
-        tokenizer: 已加载的 tokenizer（None 则自动加载）
-        checkpoint_path: 模型路径（自动加载时用）
-        device: 推理设备
-        max_length: 最大序列长度
-    
-    返回:
-        {
-            "label": 0 或 1,
-            "label_name": "合规" 或 "不合规",
-            "confidence": 0.0~1.0 的置信度,
-        }
-    """
-    if model is None or tokenizer is None:
-        model, tokenizer = load_moderation_model(checkpoint_path, device=device)
-    
-    # tokenize
-    inputs = tokenizer(
-        text,
-        max_length=max_length,
-        padding="max_length",
-        truncation=True,
-        return_tensors="pt",
-    )
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    
-    # 推理
     with torch.no_grad():
-        outputs = model(**inputs, return_dict=True)
-        logits = outputs.logits
-        probs = F.softmax(logits, dim=-1)
+        outputs = _model(**inputs)
+        logits = outputs[0] if isinstance(outputs, tuple) else outputs.logits
+        probs = torch.softmax(logits, dim=-1)
+        pred = torch.argmax(probs, dim=-1).item()
+        conf = probs[0][pred].item()
     
-    # 取最高概率的类别
-    pred_label = int(torch.argmax(probs, dim=-1).item())
-    confidence = float(probs[0, pred_label].item())
-    
-    return {
-        "label": pred_label,
-        "label_name": LABEL_MAP.get(pred_label, "未知"),
-        "confidence": round(confidence, 4),
-    }
-
-
-# ──────────────────────────────────────────────
-# CLI 入口
-# ──────────────────────────────────────────────
-
-def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="合规校验模型预测")
-    parser.add_argument(
-        "--text",
-        type=str,
-        default="根据《民法典》，合同违约方应承担赔偿责任。",
-        help="待分类的文本",
-    )
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        default=DEFAULT_CHECKPOINT,
-        help="checkpoint 目录路径",
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="推理设备",
-    )
-    
-    args = parser.parse_args()
-    
-    result = predict_text(
-        text=args.text,
-        checkpoint_path=args.checkpoint,
-        device=args.device,
-    )
-    print(f"📝 输入: {args.text}")
-    print(f"🏷️  结果: label={result['label']}, {result['label_name']}, confidence={result['confidence']}")
-
-
-if __name__ == "__main__":
-    main()
+    # pred=0 表示合规，pred=1 表示违规
+    is_safe = (pred == 0)
+    return is_safe, conf

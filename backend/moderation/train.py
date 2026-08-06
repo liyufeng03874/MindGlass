@@ -100,12 +100,12 @@ def run_training(
         weight_decay: 权重衰减
         seed: 随机种子
     """
-    print(f"📂 加载数据: {jsonl_path}")
+    print(f"[DATA] 加载数据: {jsonl_path}")
     train_dataset, val_dataset = tokenize_and_split(jsonl_path)
-    print(f"✅ train={len(train_dataset)}, val={len(val_dataset)}")
+    print(f"[OK] train={len(train_dataset)}, val={len(val_dataset)}")
 
     # 加载 tokenizer 和模型（本地，不联网）
-    print(f"🤖 加载模型: {model_path}")
+    print(f"[MODEL] 加载模型: {model_path}")
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
     model = AutoModelForSequenceClassification.from_pretrained(
         model_path,
@@ -151,18 +151,18 @@ def run_training(
         compute_metrics=compute_metrics,
     )
 
-    print("🚀 开始训练...")
+    print("[TRAIN] 开始训练...")
     train_result = trainer.train()
-    
+
     # 保存最终 checkpoint
     final_path = os.path.join(output_dir, "final")
     trainer.save_model(final_path)
     tokenizer.save_pretrained(final_path)
-    print(f"✅ 模型已保存至: {final_path}")
-    
+    print(f"[OK] 模型已保存至: {final_path}")
+
     # 输出训练指标
     metrics = train_result.metrics
-    print(f"📊 训练指标: {metrics}")
+    print(f"[METRICS] 训练指标: {metrics}")
     
     return final_path
 
