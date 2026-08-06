@@ -736,6 +736,21 @@ class ReactLoop:
         for tc_id in self._last_tc_node_ids:
             self._add_edge(tc_id, obs_node.id)
 
+        # 打断重试场景：未被打断的兄弟工具节点应连到新评估节点，
+        # 并移除它指向已打断(replaced/branch)评估节点的旧边
+        for n in self.store.nodes:
+            if n.type != "ToolCall" or n.status != "done":
+                continue
+            if n.id in self._last_tc_node_ids or n.step_index >= self.step_index:
+                continue
+            def _is_stale(e, _src=n.id):
+                t = self.store.get_node_by_id(e.to_id)
+                return (e.from_id == _src and t is not None
+                        and t.type == "Observe" and t.status in ("replaced", "branch"))
+            if any(_is_stale(e) for e in self.store.edges):
+                self.store.edges = [e for e in self.store.edges if not _is_stale(e)]
+                self._add_edge(n.id, obs_node.id)
+
         self._last_node = obs_node
         yield self._emit_last_node()
 
@@ -1092,7 +1107,14 @@ class ReactLoop:
         # 初始规划完成后步进，避免首轮 ToolCall 与 Plan 共享 step_index（右侧布局同层）
         self.step_index += 1
 
-        # ── 决策回环 ──
+        # ── 决策回环（与重试路径共用 _decision_loop）──
+        async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
+            yield event
+
+    async def _decision_loop(self, plan_result: dict, plan_count: int,
+                             observe_outputs: list[dict]) -> AsyncGenerator[str, None]:
+        """统一决策回环：need_more → 补搜 → 评估 → 再决策，直到 sufficient 或轮数上限，然后 Answer。
+        首次 run 与所有重试路径共用这一份逻辑——重试就是接着走同一条路。"""
         while plan_result.get("decision") == "need_more" and plan_count < MAX_PLAN_COUNT:
             # 获取工具步骤
             if plan_count == 1:
@@ -1103,7 +1125,7 @@ class ReactLoop:
                 queries = suggested.get("suggested_queries", [])
                 if not queries:
                     # LLM 说 need_more 但没给 query，兜底用原始 query
-                    queries = [query]
+                    queries = [self.query]
                 steps = [{"tool": "search", "description": q, "params": {"query": q}} for q in queries]
 
             # 执行工具
@@ -1243,35 +1265,12 @@ class ReactLoop:
                     plan_result = n.data
                     break
 
-            # 根据决策继续
-            if plan_result.get("decision") == "need_more" and plan_count < MAX_PLAN_COUNT:
-                suggested = plan_result.get("if_need_more", {})
-                queries = suggested.get("suggested_queries", [self.query])
-                steps = [{"tool": "search", "description": q, "params": {"query": q}} for q in queries]
-                async for event in self._execute_tools(steps):
-                    yield event
-                if self.interrupted:
-                    return
-                self.step_index += 1
-                async for event in self._stream_observe(observe_outputs):
-                    yield event
-                if self.interrupted:
-                    return
-                self.step_index += 1
-
-                # 再次决策（流式）
-                plan_count += 1
-                async for event in self._stream_plan(plan_count, observe_outputs):
-                    yield event
-                if self.interrupted:
-                    return
-                self.step_index += 1
-
             for n in reversed(self.store.nodes):
                 if n.type == "Plan":
                     plan_result = n.data
                     break
-            async for event in self._answer_phase(observe_outputs, plan_result):
+            # 决策完成后汇入统一决策回环——重试与首次运行走同一条路
+            async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
                 yield event
 
         elif node.type == "Plan":
@@ -1308,7 +1307,8 @@ class ReactLoop:
                 if n.type == "Plan":
                     plan_result = n.data
                     break
-            async for event in self._answer_phase(observe_outputs, plan_result):
+            # 决策完成后汇入统一决策回环——重试与首次运行走同一条路
+            async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
                 yield event
 
         elif node.type == "Observe":
@@ -1334,7 +1334,8 @@ class ReactLoop:
                 if n.type == "Plan":
                     plan_result = n.data
                     break
-            async for event in self._answer_phase(observe_outputs, plan_result):
+            # 决策完成后汇入统一决策回环——重试与首次运行走同一条路
+            async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
                 yield event
 
         else:
@@ -1455,7 +1456,8 @@ class ReactLoop:
             if n.type == "Plan":
                 plan_result = n.data
                 break
-        async for event in self._answer_phase(observe_outputs, plan_result):
+        # 决策完成后汇入统一决策回环——重试与首次运行走同一条路
+        async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
             yield event
 
     # ── 辅助 ──
