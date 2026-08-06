@@ -35,8 +35,8 @@
             {{ showGraph ? '👁️ 隐藏思维' : '💡 思维可视化' }}
           </button>
         </template>
-        <!-- Admin 入口 -->
-        <router-link to="/admin" class="admin-link">🔧 后台管理</router-link>
+        <!-- Admin 入口：新开标签页，不覆盖当前页 -->
+        <a href="/admin" target="_blank" rel="noopener" class="admin-link">🔧 后台管理</a>
       </div>
     </header>
 

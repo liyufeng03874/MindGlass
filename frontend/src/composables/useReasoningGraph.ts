@@ -91,6 +91,16 @@ export function useReasoningGraph(
       let xPosition = centerX - 100
       let yPosition = node.step_index * spacingY
 
+      // 打断/废弃的单节点：立即靠左，不等新节点出现才让位
+      // （retry 新旧节点共用 step_index；新节点出来前旧节点是同 step 唯一节点，
+      //   若不提前靠左会先闪现在居中位置）
+      if (isDeprecated && !isParallel) {
+        const sameStepNonParallel = (stepGroups.get(node.step_index) || []).filter(n => !parallelNodeIds.has(n.id))
+        if (sameStepNonParallel.length === 1) {
+          xPosition = centerX - 100 - rowSpacing
+        }
+      }
+
       if (isParallel) {
         const pgId = node.data?.parallel_group_id
         const group = parallelGroups.get(pgId!)
