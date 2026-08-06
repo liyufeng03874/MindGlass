@@ -26,11 +26,15 @@
         <template v-if="item.kind === 'thought'">
           <!-- 将连续的 toolcall block 分组为并行组（同 parallelGroupId） -->
           <template v-for="blockGroup in blockGroups" :key="'bg-' + blockGroup.groupId">
+            <!-- 分割线 block（打断/重试分支的边界） -->
+            <div v-if="blockGroup.single && blockGroup.single.type === 'divider'" class="phase-divider">
+              <span class="divider-label">{{ blockGroup.single.title }}</span>
+            </div>
             <!-- 单列 block（plan/observe/answer 或孤立 toolcall） -->
             <div
-              v-if="blockGroup.single"
+              v-else-if="blockGroup.single"
               :data-block-id="blockGroup.single.id"
-              :class="['thought-block', `thought-${blockGroup.single.type}`]"
+              :class="['thought-block', `thought-${blockGroup.single.type}`, { 'phase-cut': blockGroup.single.phase === 'cut', 'phase-retry': blockGroup.single.phase === 'retry' }]"
             >
               <!-- 标题行 -->
               <div class="thought-header">
@@ -1613,5 +1617,50 @@ const displayItems = computed<DisplayItem[]>(() => {
 .panel-body::-webkit-scrollbar-thumb:hover,
 .deprecated-body::-webkit-scrollbar-thumb:hover {
   background: rgba(167, 139, 250, 0.6);
+}
+/* ── 分割线（打断/重试分支边界）── */
+.phase-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 4px 10px;
+}
+.phase-divider::before,
+.phase-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+}
+.phase-divider::before {
+  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.55));
+}
+.phase-divider::after {
+  background: linear-gradient(90deg, rgba(251, 191, 36, 0.55), transparent);
+}
+.divider-label {
+  font-size: 12px;
+  color: #fbbf24;
+  letter-spacing: 2px;
+  white-space: nowrap;
+}
+
+/* 被打断侧 block：整体降视觉权重 */
+.thought-block.phase-cut {
+  opacity: 0.55;
+}
+.thought-block.phase-cut .thought-title::after {
+  content: ' · 被打断侧';
+  color: #8a8aa0;
+  font-size: 11px;
+}
+
+/* 重试分支 block：琥珀左缘标识 */
+.thought-block.phase-retry {
+  border-left: 2px solid rgba(251, 191, 36, 0.65);
+}
+.thought-block.phase-retry .thought-title::after {
+  content: ' · 重试';
+  color: #fbbf24;
+  font-size: 11px;
 }
 </style>

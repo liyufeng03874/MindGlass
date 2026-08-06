@@ -56,10 +56,12 @@ export interface SSEEvent {
 export interface LeftBlock {
   id: string            // = node_id
   nodeId: string
-  type: 'plan' | 'toolcall' | 'observe' | 'answer'
+  type: 'plan' | 'toolcall' | 'observe' | 'answer' | 'divider'
   status: 'loading' | 'done' | 'error'
   title: string         // 如 "🧠 正在规划..."
   content: string       // 流式内容（node_streaming 的 content 直接覆盖）
+  /** 阶段标记：cut=被打断侧，retry=重试分支（左侧样式区分用） */
+  phase?: 'cut' | 'retry'
   metadata?: {
     toolName?: string
     params?: Record<string, any>

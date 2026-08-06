@@ -39,11 +39,24 @@ export function useAgentGraph() {
 
   const messages = ref<Array<{ role: 'user' | 'agent', content: string }>>([])
 
+  /** 截断点节点（打断后只有它能点重试；重试或新查询后清空） */
+  const cutNode = ref<AgentNode | null>(null)
+
+  /** 当前活跃的 EventSource（打断收流用） */
+  let activeEventSource: EventSource | null = null
+  /** 已收到 interrupted 事件（onerror 不再误报“连接断开”） */
+  let interruptedReceived = false
+  /** 重试分支标记：重试开始后的新 block 标记 phase=retry（左侧样式区分） */
+  let inRetryBranch = false
+
   function sendMessage(query: string) {
     messages.value.push({ role: 'user', content: query })
     status.value = '🤔 连接中...'
     connected.value = true
     isRunning.value = true
+    cutNode.value = null
+    interruptedReceived = false
+    inRetryBranch = false
 
     // 重置图状态
     graph.value = {
@@ -68,6 +81,7 @@ export function useAgentGraph() {
     const eventSource = new EventSource(
       `${API_BASE}/api/run?query=${encodeURIComponent(query)}`
     )
+    activeEventSource = eventSource
 
     eventSource.onmessage = (event) => {
       try {
@@ -79,11 +93,46 @@ export function useAgentGraph() {
     }
 
     eventSource.onerror = () => {
+      // 打断场景：interrupted 事件已收束，这里主动关闭不算断线
+      if (interruptedReceived) {
+        eventSource.close()
+        activeEventSource = null
+        return
+      }
       status.value = '连接断开'
       connected.value = false
       isRunning.value = false
       eventSource.close()
+      activeEventSource = null
     }
+  }
+
+  /** 打断当前运行：通知后端设中断标志，后端收尾后发 interrupted 事件 */
+  async function interrupt(node: AgentNode) {
+    if (!isRunning.value) return
+    cutNode.value = node
+    status.value = '✂️ 正在打断...'
+    try {
+      const resp = await fetch(`${API_BASE}/api/interrupt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step_index: node.step_index }),
+      })
+      const body = await resp.json().catch(() => ({}))
+      // 后端无活跃 run（回答已生成完毕才点到截断）：明确告知而非静默
+      if (body && body.status === 'no_active_run') {
+        cutNode.value = null
+        status.value = '回答已完成，本次无需打断'
+      }
+    } catch (e) {
+      status.value = '❌ 打断请求失败'
+      cutNode.value = null
+    }
+  }
+
+  /** 清除截断点状态（清空页面用） */
+  function clearCut() {
+    cutNode.value = null
   }
 
   function handleEvent(event: SSEEvent) {
@@ -109,6 +158,7 @@ export function useAgentGraph() {
             status: 'loading',
             title,
             content: '',
+            phase: inRetryBranch ? 'retry' : undefined,
           }
           leftBlocks.value.push(block)
         }
@@ -192,6 +242,7 @@ export function useAgentGraph() {
                 resultFull,
               },
               parallelGroupId: node.data?.parallel_group_id,
+              phase: inRetryBranch ? 'retry' : undefined,
             }
             leftBlocks.value.push(block)
           } else {
@@ -223,8 +274,13 @@ export function useAgentGraph() {
         }
 
         if (node.type === 'Answer' && node.status !== 'replaced') {
-          messages.value.push({ role: 'agent', content: node.data.output })
-          status.value = '✅ 完成'
+          // 安全拦截的 Answer 不重复推送（safety_interrupt 事件已推送过）
+          if (!node.data?.safety_interrupt) {
+            messages.value.push({ role: 'agent', content: node.data.output })
+            status.value = '✅ 完成'
+          } else {
+            status.value = '⚠️ 安全策略拦截'
+          }
           isRunning.value = false
         } else {
           status.value = `已生成 ${node.type} 节点`
@@ -235,6 +291,7 @@ export function useAgentGraph() {
       case 'run_complete': {
         connected.value = false
         isRunning.value = false
+        cutNode.value = null
         if (event.data.graph) {
           console.log('[Run Complete] edges:', JSON.stringify(event.data.graph.edges, null, 2))
           graph.value = event.data.graph as ReasoningGraph
@@ -246,6 +303,59 @@ export function useAgentGraph() {
             block.status = 'done'
           }
         }
+        break
+      }
+
+      case 'interrupted': {
+        // 用户打断：后端已完成收尾（截断点后置灰），前端收束
+        interruptedReceived = true
+        if (activeEventSource) {
+          activeEventSource.close()
+          activeEventSource = null
+        }
+        if (event.data.graph) {
+          graph.value = event.data.graph as ReasoningGraph
+        }
+        // 左侧还在 loading 的流式 block 标记结束；被打断侧的 block 标记 phase=cut
+        const interruptedIds = new Set(
+          ((event.data.graph?.nodes as any[]) || [])
+            .filter((n: any) => n.data?.interrupted)
+            .map((n: any) => n.id)
+        )
+        for (const block of leftBlocks.value) {
+          if (block.status === 'loading') block.status = 'done'
+          if (interruptedIds.has(block.nodeId)) block.phase = 'cut'
+        }
+        // 分割线：打断边界
+        leftBlocks.value.push({
+          id: `divider_cut_${Date.now()}`,
+          nodeId: '',
+          type: 'divider',
+          status: 'done',
+          title: '✂️ 在此打断',
+          content: '',
+        })
+        status.value = '⏸ 已打断 · 在截断点可重试'
+        isRunning.value = false
+        connected.value = false
+        break
+      }
+
+      case 'safety_interrupt': {
+        // 安全策略拦截：清空当前回答，显示拦截提示
+        const interruptText = event.data.text || '很抱歉，该回答包含不合规内容，已被安全策略拦截。'
+        // 清空左侧 Answer block 的内容，替换为拦截提示
+        const answerBlock = leftBlocks.value.find((b: LeftBlock) => b.type === 'answer')
+        if (answerBlock) {
+          answerBlock.content = interruptText
+          answerBlock.status = 'error'
+          answerBlock.title = '⚠️ 安全拦截'
+        }
+        // 右侧消息也显示拦截提示
+        messages.value.push({ role: 'agent', content: `⚠️ ${interruptText}` })
+        status.value = '⚠️ 安全策略拦截'
+        isRunning.value = false
+        connected.value = false
         break
       }
 
@@ -354,6 +464,17 @@ export function useAgentGraph() {
 
   /** 从指定 step_index 重试（支持编辑后重跑） */
   async function retryFrom(stepIndex: number, originalNode: any, editedData?: Record<string, any>) {
+    // 重试开始后清除截断点状态，进入重试分支
+    cutNode.value = null
+    inRetryBranch = true
+    leftBlocks.value.push({
+      id: `divider_retry_${Date.now()}`,
+      nodeId: '',
+      type: 'divider',
+      status: 'done',
+      title: '🔄 重试分支',
+      content: '',
+    })
     // 检测：如果是 ToolCall 类型且属于并行组，走方案 C
     const isParallelGroup = originalNode?.data?.parallel_group_id
 
@@ -414,6 +535,16 @@ export function useAgentGraph() {
 
   /** 方案 C：并行重试——被编辑的旧节点废弃推远，新节点占原位 */
   async function retryFromGraph(stepIndex: number, originalNode: any, editedData?: Record<string, any>) {
+    cutNode.value = null
+    inRetryBranch = true
+    leftBlocks.value.push({
+      id: `divider_retry_${Date.now()}`,
+      nodeId: '',
+      type: 'divider',
+      status: 'done',
+      title: '🔄 重试分支',
+      content: '',
+    })
     status.value = '🔄 正在并行重试...'
     connected.value = true
     isRunning.value = true
@@ -501,7 +632,10 @@ export function useAgentGraph() {
     isRunning,
     messages,
     leftBlocks,
+    cutNode,
     sendMessage,
+    interrupt,
+    clearCut,
     retryFrom,
     retryFromGraph,
   }

@@ -21,7 +21,10 @@ const EDGE_STYLES: Record<string, { color: string; animated: boolean; dashed: bo
   Pending: { color: 'rgba(251,191,36,0.4)',  animated: true,  dashed: true },
 }
 
-export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
+export function useReasoningGraph(
+  graph: ComputedRef<ReasoningGraph | null>,
+  cutNodeId: ComputedRef<string | null> | null = null,
+) {
   const flowNodes = computed<Node[]>(() => {
     if (!graph.value) return []
 
@@ -33,6 +36,7 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
     const branchOffsetX = -120  // branch 路径左偏移
     const newBranchOffsetX = 120  // 新路径右偏移
     const spacingX = 220  // 并行节点水平间距
+    const rowSpacing = 320  // 同 step 多节点（非并行）行间距
     const nodes: Node[] = []
     const activeNodes = graph.value.nodes.filter(n => n.status !== 'discarded')
 
@@ -55,6 +59,14 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       group.forEach(n => parallelNodeIds.add(n.id))
     })
 
+    // 整组废弃的并行组：不让它占中心位，整组左移给活跃节点让路
+    const allDeprecatedGroups = new Set<string>()
+    parallelGroups.forEach((group, pgId) => {
+      if (group.every(n => n.status === 'branch' || n.status === 'replaced')) {
+        allDeprecatedGroups.add(pgId)
+      }
+    })
+
     // 按 step_index 分组，处理同 step 多节点（Observe/Answer 等）
     const stepGroups = new Map<number, AgentNode[]>()
     activeNodes.forEach(node => {
@@ -69,6 +81,10 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
       const isReplaced = node.status === 'replaced'
       const isDeprecated = isBranch || isReplaced
       const isParallel = parallelNodeIds.has(node.id)
+      // 截断点节点：琥珀色高亮 + 呼吸动画，与废弃置灰区分开
+      // 节点一旦进入废弃态（重试后旧截断点变 branch），不再套截断样式
+      const isCut = !!cutNodeId?.value && cutNodeId.value === node.id
+        && node.status !== 'branch' && node.status !== 'replaced' && node.status !== 'discarded'
 
       // 布局：并行节点等间距居中，branch/replaced 排最左
       // 非并行但同 step 多节点（Observe/Answer）也等间距，replaced 排最左
@@ -88,7 +104,12 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
             return 0
           })
           const idx = sorted.findIndex(n => n.id === node.id)
-          xPosition = centerX - 100 + (idx - (sorted.length - 1) / 2) * spacingX
+          if (allDeprecatedGroups.has(pgId!)) {
+            // 整组废弃：整体左移排布，把中心让给活跃节点
+            xPosition = centerX - 100 - rowSpacing + (idx - (sorted.length - 1) / 2) * spacingX
+          } else {
+            xPosition = centerX - 100 + (idx - (sorted.length - 1) / 2) * spacingX
+          }
         }
       } else if ((stepGroups.get(node.step_index)?.length ?? 1) > 1) {
         // 同 step 有多个节点，但不是并行组（Observe/Answer 等）
@@ -98,8 +119,6 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
         })
         if (group.length > 1) {
           // 非并行多节点同 step：废弃节点靠左、活跃节点居中
-          // 使用比并行组更宽的间距，避免宽标签（如最终回答）重叠
-          const rowSpacing = 320
           const active = group.filter(n => n.status !== 'branch' && n.status !== 'replaced')
           const deprecated = group.filter(n => n.status === 'branch' || n.status === 'replaced')
           if (isDeprecated) {
@@ -110,18 +129,25 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
             xPosition = centerX - 100 + (aIdx - (active.length - 1) / 2) * rowSpacing
           }
         } else if (group.length === 1) {
-          // 单个非并行节点与并行组共享 step_index：偏移到并行组左侧
-          const hasParallelSiblings = activeNodes.some(n =>
-            n.step_index === node.step_index && parallelNodeIds.has(n.id)
+          // 单个非并行节点与并行组共享 step_index：
+          // 只有并行组里还有活跃节点时才左移让路；整组废弃时本节点占中心
+          const hasActiveParallelSiblings = activeNodes.some(n =>
+            n.step_index === node.step_index
+            && parallelNodeIds.has(n.id)
+            && !allDeprecatedGroups.has(n.data?.parallel_group_id)
           )
-          if (hasParallelSiblings) {
+          if (hasActiveParallelSiblings) {
             xPosition = centerX - 100 - spacingX
           }
         }
       }
 
       const isDegraded = node.type === 'Answer' && node.data?.degraded === true
-      const borderColor = isDegraded ? '#fa8c16' : (isDeprecated ? 'rgba(100,116,139,0.4)' : colorScheme.border)
+      const borderColor = isCut
+        ? '#fbbf24'
+        : isDegraded
+          ? '#fa8c16'
+          : (isDeprecated ? 'rgba(100,116,139,0.4)' : colorScheme.border)
 
       const flowNode: Node = {
         id: node.id,
@@ -141,20 +167,30 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
         style: {
           background: isPending ? 'rgba(10,14,31,0.5)' : isDeprecated ? 'rgba(10,14,31,0.5)' : colorScheme.bg,
           backdropFilter: 'blur(8px)',
-          border: isPending ? `1.5px dashed ${colorScheme.border}` : isParallel ? `2px solid ${borderColor}` : `1.5px solid ${borderColor}`,
+          border: isCut
+            ? '2px solid #fbbf24'
+            : isPending
+              ? `1.5px dashed ${colorScheme.border}`
+              : isParallel
+                ? `2px solid ${borderColor}`
+                : `1.5px solid ${borderColor}`,
           borderRadius: '8px',
           padding: '12px',
           minWidth: '200px',
           color: '#e6e9f5',
-          opacity: isDeprecated ? 0.45 : isPending ? 0.6 : 1,
-          boxShadow: isPending
-            ? `0 0 6px ${colorScheme.border}40`
-            : isDegraded
-              ? '0 0 12px rgba(250,140,22,0.35)'
-              : isDeprecated
-                ? 'inset 0 0 0 1px rgba(100,116,139,0.3)'
-                : `0 0 10px ${borderColor}30, 0 2px 12px rgba(0,0,0,0.4)`,
+          opacity: isCut ? 1 : isDeprecated ? 0.45 : isPending ? 0.6 : 1,
+          // 截断点的 boxShadow/animation 内联控制（不依赖 class diff，保证重试后能清除）
+          boxShadow: isCut
+            ? '0 0 14px rgba(251,191,36,0.5)'
+            : isPending
+              ? `0 0 6px ${colorScheme.border}40`
+              : isDegraded
+                ? '0 0 12px rgba(250,140,22,0.35)'
+                : isDeprecated
+                  ? 'inset 0 0 0 1px rgba(100,116,139,0.3)'
+                  : `0 0 10px ${borderColor}30, 0 2px 12px rgba(0,0,0,0.4)`,
           ...(isDeprecated ? { backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 20px)' } : {}),
+          ...(isCut ? { animation: 'cutPulse 1.6s ease-in-out infinite' } : {}),
         },
       }
 
@@ -199,6 +235,8 @@ export function useReasoningGraph(graph: ComputedRef<ReasoningGraph | null>) {
         id: `edge_${idx}`,
         source: edge.from,
         target: edge.to,
+        // 直线连接：跨水平距离时默认贝塞尔会拐出大弯，直线更干净
+        type: 'straight',
         animated: isBranchEdge ? false : isPendingEdge ? style.animated : style.animated,
         style: {
           stroke: isDimmed ? '#d9d9d9' : style.color,

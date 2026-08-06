@@ -55,7 +55,14 @@
       </div>
       <transition name="slide">
         <div v-if="showGraph" class="right-panel">
-          <ReasoningGraph :graph="graph" :isRunning="isRunning" @retry="onRetry" @focus-answer="onFocusAnswer" />
+          <ReasoningGraph
+            :graph="graph"
+            :isRunning="isRunning"
+            :cutNodeId="cutNode?.id ?? null"
+            @retry="onRetry"
+            @interrupt="onInterrupt"
+            @focus-answer="onFocusAnswer"
+          />
         </div>
       </transition>
     </main>
@@ -70,7 +77,7 @@ import MirrorIcon from '../components/MirrorIcon.vue'
 import { useAgentGraph } from '../composables/useAgentGraph'
 import { usePhase, derivePhase } from '../composables/usePhase'
 
-const { graph, status, connected, messages, isRunning, leftBlocks, sendMessage, retryFrom } = useAgentGraph()
+const { graph, status, connected, messages, isRunning, leftBlocks, cutNode, sendMessage, interrupt, clearCut, retryFrom } = useAgentGraph()
 
 // ── 全局相位：从推理状态推导，驱动整站氛围层呼吸（水镜 v2.1 第一遍）──
 const { phase } = usePhase()
@@ -138,6 +145,11 @@ function onSend(query: string) {
 
 function onRetry(stepIndex: number, originalNode: any, editedData: Record<string, any>) {
   retryFrom(stepIndex, originalNode, editedData)
+}
+
+/** 运行中在指定节点处打断 */
+function onInterrupt(node: any) {
+  interrupt(node)
 }
 
 function onFocusAnswer() {
@@ -210,6 +222,7 @@ function clearDemo() {
   demoElapsedLocked.value = false
   totalElapsed.value = null
   status.value = '就绪'
+  clearCut()
 }
 </script>
 

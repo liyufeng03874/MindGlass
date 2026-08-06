@@ -68,7 +68,7 @@
           <!-- 决策节点（Plan 2+）：展示决策 + 理由 -->
           <template v-if="isDecisionNode">
             <div class="decision-banner" :class="isDeprecatedNode ? 'decision-deprecated' : `decision-${planDecision}`">
-              {{ DECISION_LABELS[planDecision] || planDecision }}
+              {{ planDecisionLabel }}
             </div>
             <label>决策理由</label>
             <div class="output-content">{{ planReasoning }}</div>
@@ -119,10 +119,24 @@
 
       </div>
 
-      <div v-if="editingNode && !['Observe', 'Plan'].includes(editingNode.type)" class="panel-footer">
-        <button class="retry-btn" @click="handleRetry" :disabled="isRunning">
-          {{ isRunning ? '执行中...' : '🔄 截断并重试' }}
-        </button>
+      <div v-if="editingNode && editingNode.type === 'ToolCall' && !editingNode.data?.pending" class="panel-footer">
+        <!-- 运行中：按钮为“截断”（已打断则置为执行中，不可重复截断） -->
+        <template v-if="isRunning">
+          <button class="retry-btn cut-btn" :disabled="!!cutNodeId" @click="handleInterrupt">
+            {{ cutNodeId ? '⏸ 执行中...' : '✂️ 截断' }}
+          </button>
+          <p v-if="cutNodeId" class="readonly-hint">已打断，正在收尾…</p>
+        </template>
+        <!-- 打断后：只有截断点节点能点重试；其他节点只显示提示 -->
+        <template v-else-if="cutNodeId">
+          <button v-if="cutNodeId === editingNode.id" class="retry-btn" @click="handleRetry">
+            🔄 重试
+          </button>
+          <p v-if="cutNodeId === editingNode.id" class="readonly-hint">✂️ 这是截断点，可修改参数后重试</p>
+          <p v-else class="readonly-hint">✂️ 在哪里打断，就在哪里重试——请回到截断点节点</p>
+        </template>
+        <!-- 正常完成：保留原有截断并重试能力（显示为“重试”） -->
+        <button v-else class="retry-btn" @click="handleRetry">🔄 重试</button>
       </div>
     </div>
 
@@ -153,14 +167,17 @@ import type { ReasoningGraph, AgentNode } from '@/types/agent'
 const props = defineProps<{
   graph: ReasoningGraph | null
   isRunning: boolean
+  cutNodeId: string | null
 }>()
 
 const emit = defineEmits<{
   (e: 'retry', stepIndex: number, originalNode: any, editedData: Record<string, any>): void
+  (e: 'interrupt', node: AgentNode): void
   (e: 'focus-answer'): void
 }>()
 const graphRef = computed(() => props.graph)
-const { flowNodes: nodes, flowEdges: edges } = useReasoningGraph(graphRef)
+const cutIdRef = computed(() => props.cutNodeId ?? null)
+const { flowNodes: nodes, flowEdges: edges } = useReasoningGraph(graphRef, cutIdRef)
 
 const { fitView } = useVueFlow()
 
@@ -328,9 +345,18 @@ function buildObserveOutput(parsed: any): string {
 // ── Plan 面板只读展示 ──
 const DECISION_LABELS: Record<string, string> = {
   sufficient: '✅ 决策：信息充足',
-  need_more: '🔍 决策：需要补搜',
+  need_more: '🔍 决策：信息不足',
   terminate: '⚠️ 决策：强制终止',
 }
+
+/** 决策横幅文案：第 2 轮（首轮决策）说“信息不足”，第 3 轮起才说“需要补搜”，与节点标签一致 */
+const planDecisionLabel = computed(() => {
+  const pc = editingNode.value?.data?.plan_count ?? 1
+  if (planDecision.value === 'need_more') {
+    return pc >= 3 ? '🔍 决策：需要补搜' : '🔍 决策：信息不足'
+  }
+  return DECISION_LABELS[planDecision.value] || planDecision.value
+})
 
 /** 工具中文名（与后端 TOOL_LABELS 保持一致） */
 function toolLabel(tool: string): string {
@@ -361,6 +387,9 @@ const editForm = ref<Record<string, any>>({})
 function onNodeClick({ node }: { node: { id: string } }) {
   const target = props.graph?.nodes.find(n => n.id === node.id)
   if (!target) return
+
+  // 前端预测的虚拟 pending 节点：不可点开编辑（自然没有截断/重试按钮）
+  if (target.status === 'pending' || target.data?.pending) return
 
   // Answer 节点：废弃回答用弹窗展示旧内容；实际最终回答聚焦聊天区
   if (target.type === 'Answer') {
@@ -393,6 +422,22 @@ function closeEditor() {
   editingNode.value = null
   editForm.value = {}
 }
+
+function handleInterrupt() {
+  if (!editingNode.value) return
+  // 拷贝当前节点完整信息，交给 composable 记录为截断点
+  emit('interrupt', JSON.parse(JSON.stringify(editingNode.value)))
+}
+
+// 图更新后同步编辑面板引用的节点对象（打断后节点状态/标签会变，面板要跟着新）
+watch(
+  () => props.graph?.nodes,
+  () => {
+    if (!editingNode.value) return
+    const fresh = props.graph?.nodes.find(n => n.id === editingNode.value!.id)
+    if (fresh) editingNode.value = fresh
+  }
+)
 
 async function handleRetry() {
   if (!editingNode.value) return
@@ -917,5 +962,33 @@ label {
   background: rgba(255, 255, 255, 0.08);
   color: #6b6b80;
   cursor: not-allowed;
+}
+
+/* 截断按钮：琥珀色，与截断点节点呼应 */
+.retry-btn.cut-btn {
+  background: rgba(251, 191, 36, 0.85);
+  color: #1a1400;
+}
+
+.retry-btn.cut-btn:hover {
+  background: #fbbf24;
+}
+
+.retry-btn.cut-btn:disabled {
+  background: rgba(255, 255, 255, 0.08);
+  color: #6b6b80;
+  cursor: not-allowed;
+}
+</style>
+
+<style>
+/* 截断点节点呼吸动画（vue-flow 节点 class，需全局样式生效） */
+.cut-node-pulse {
+  animation: cutPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cutPulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.35); }
+  50% { box-shadow: 0 0 26px rgba(251, 191, 36, 0.8); }
 }
 </style>
