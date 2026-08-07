@@ -1382,8 +1382,6 @@ class ReactLoop:
                 existing.data["branch"] = True
                 existing.label = f"{node_data.get('label', node_data['type'])}（废弃）"
                 branch_ids.add(existing.id)
-                # 补回废弃链展示边（问题1）
-                self._restore_branch_display_edges(existing)
                 yield self._emit("node_complete", {"node": existing.to_dict(), "graph": self.store.to_dict()})
 
         # ── 2. 级联标记 replaced ──
@@ -1406,6 +1404,12 @@ class ReactLoop:
 
         # 级联废弃后断开存活工具节点→已废弃评估节点的旧边（问题4）
         self._prune_stale_sibling_edges()
+
+        # 补回废弃链展示边（问题A修复：级联标记后再补边，Observe 已是 replaced/branch）
+        for bid in branch_ids:
+            branch_node = self.store.get_node_by_id(bid)
+            if branch_node:
+                self._restore_branch_display_edges(branch_node)
 
         # ── 3. 收集截断前的 observe_outputs ──
         observe_outputs = self._collect_observe_outputs_before(step_index)
