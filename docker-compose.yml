@@ -13,6 +13,9 @@ services:
       - .env
     environment:
       - TZ=Asia/Shanghai
+      - BERT_SAFETY_MODEL=/app/models/bert-safety
+    volumes:
+      - /opt/projects/models/bert-safety:/app/models/bert-safety:ro
     networks:
       - projects_default
     restart: unless-stopped

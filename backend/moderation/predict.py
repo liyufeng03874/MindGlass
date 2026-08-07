@@ -3,8 +3,8 @@ import os
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# 模型路径
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "output", "checkpoint", "final")
+# 模型路径（支持环境变量配置，默认使用本地路径）
+MODEL_PATH = os.environ.get("BERT_SAFETY_MODEL", os.path.join(os.path.dirname(__file__), "output", "checkpoint", "final"))
 
 # 全局模型实例
 _model = None
