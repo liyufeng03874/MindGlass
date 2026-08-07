@@ -328,21 +328,38 @@ export function useAgentGraph() {
         if (event.data.graph) {
           graph.value = event.data.graph as ReasoningGraph
         }
+        const graphNodes = ((event.data.graph?.nodes as any[]) || [])
+        // 从物化节点的 data 里取已物化内容（问题B修复）：
+        // Answer→output 文本，Plan→output/reasoning，Observe→结构化 observe_output
+        const blockContentFromNode = (n: any): string => {
+          const d = n.data || {}
+          if (n.type === 'Answer') return typeof d.output === 'string' ? d.output : ''
+          if (n.type === 'Plan') return (typeof d.output === 'string' && d.output) || (typeof d.reasoning === 'string' && d.reasoning) || ''
+          if (n.type === 'Observe') return d.observe_output ? JSON.stringify(d.observe_output) : (typeof d.summary === 'string' ? d.summary : '')
+          return ''
+        }
         // 左侧还在 loading 的流式 block 标记结束；被废弃的 block 标记 phase=cut（置灰）
         const interruptedIds = new Set(
-          ((event.data.graph?.nodes as any[]) || [])
+          (graphNodes)
             .filter((n: any) => n.data?.interrupted
               || n.status === 'replaced' || n.status === 'branch' || n.status === 'discarded')
             .map((n: any) => n.id)
         )
         for (const block of leftBlocks.value) {
           if (block.status === 'loading') block.status = 'done'
-          if (interruptedIds.has(block.nodeId)) block.phase = 'cut'
+          if (interruptedIds.has(block.nodeId)) {
+            block.phase = 'cut'
+            // 打断早于首个 chunk 到达时流式 block 内容为空——用物化内容回填，不显示"等待内容"
+            if (!block.content) {
+              const srcNode = graphNodes.find((n: any) => n.id === block.nodeId)
+              if (srcNode) block.content = blockContentFromNode(srcNode)
+            }
+          }
         }
         // 未流式过的废弃节点（如被打断时还没出现的决策/回答）补成置灰 block，
         // 让左侧聊天完整呈现"被打断侧"的后续链（问题2）
         const existingIds = new Set(leftBlocks.value.map(b => b.nodeId))
-        const missedNodes = ((event.data.graph?.nodes as any[]) || [])
+        const missedNodes = graphNodes
           .filter((n: any) => (n.status === 'replaced' || n.status === 'branch')
             && !existingIds.has(n.id)
             && ['Plan', 'Observe', 'Answer', 'ToolCall'].includes(n.type))
@@ -354,13 +371,14 @@ export function useAgentGraph() {
             type: nodeTypeToBlockType(n.type),
             status: 'done',
             title: n.label || BLOCK_TITLES[n.type] || n.type,
-            content: '',
+            // 问题B修复：从 node.data 带出已物化内容，不再留空导致"等待内容"
+            content: blockContentFromNode(n),
             phase: 'cut',
             metadata: n.type === 'ToolCall' && n.data?.result !== undefined
               ? {
                   toolName: n.data?.tool || '',
                   params: n.data?.params,
-                  resultPreview: '',
+                  resultPreview: typeof n.data.result_preview === 'string' ? n.data.result_preview : '',
                   resultFull: typeof n.data.result === 'string' ? n.data.result : JSON.stringify(n.data.result),
                 }
               : undefined,
