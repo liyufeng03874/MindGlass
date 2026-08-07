@@ -1362,6 +1362,8 @@ class ReactLoop:
         方案 C：并行重试——前端发被编辑的旧节点+新节点，后端融合。
         v2 适配：Observe 使用结构化评估。
         """
+        self.query = query
+
         # ── 1. 旧节点标记 branch ──
         branch_ids = set()
         for node_data in old_nodes:
