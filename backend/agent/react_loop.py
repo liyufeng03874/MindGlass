@@ -124,28 +124,6 @@ class ReactLoop:
                 return node.id
         return None
 
-    def _restore_branch_display_edges(self, node) -> None:
-        """补回废弃链展示边：废弃工具 → 同 step+1 的废弃评估。
-        打断时 prune 删过 done→废弃评估 的边（当时还不知道它会变 branch），
-        并行重试标 branch 时补回，保证废弃链在图上是完整的一截。"""
-        for tgt in self.store.nodes:
-            if (tgt.type == "Observe" and tgt.step_index == node.step_index + 1
-                    and tgt.status in ("replaced", "branch")):
-                if not any(e.from_id == node.id and e.to_id == tgt.id for e in self.store.edges):
-                    self._add_edge(node.id, tgt.id, "Branch")
-
-    def _prune_stale_sibling_edges(self) -> None:
-        """打断/截断后立刻断开"存活工具节点 → 已废弃评估节点"的旧边。
-        存活(done)的兄弟 ToolCall 不应指向 replaced/branch 的 Observe；
-        新 Observe 诞生时 fix2 会把它连到新评估节点。"""
-        def _stale(e):
-            src = self.store.get_node_by_id(e.from_id)
-            tgt = self.store.get_node_by_id(e.to_id)
-            return (src is not None and tgt is not None
-                    and src.type == "ToolCall" and src.status == "done"
-                    and tgt.type == "Observe" and tgt.status in ("replaced", "branch"))
-        self.store.edges = [e for e in self.store.edges if not _stale(e)]
-
     def _add_edge(self, from_id: str, to_id: str, edge_type: str = "Normal") -> None:
         """添加边"""
         self.store.add_edge(ReasoningEdge(from_id=from_id, to_id=to_id, edge_type=edge_type))
@@ -174,8 +152,9 @@ class ReactLoop:
                     node.data["interrupted"] = True
                     node.label = f"{node.label}（已打断）"
         self.store.meta.interrupted = True
-        # 打断后立刻断开存活工具节点→已废弃评估节点的旧边（问题4）
-        self._prune_stale_sibling_edges()
+        # 边只标记不删除：打断侧的边收敛为 Branch 虚线；
+        # 存活节点→废弃评估的旧边保留（虚线），等新 Observe 诞生时由重连逻辑移除
+        self.store.mark_branch_edges()
         return [
             self._emit("interrupted", {
                 "cut_step_index": cut,
@@ -759,6 +738,16 @@ class ReactLoop:
         # 所有 ToolCall → Observe
         for tc_id in self._last_tc_node_ids:
             self._add_edge(tc_id, obs_node.id)
+
+        # 参与本次评估的节点（含并入的存活兄弟）移除指向废弃评估的旧边——
+        # 它们已重连到新评估，旧边只留下误导（非参与节点的旧边由下方 fix2 重连）
+        tc_ids = set(self._last_tc_node_ids)
+        def _old_dead_edge(e):
+            if e.from_id not in tc_ids or e.to_id == obs_node.id:
+                return False
+            t = self.store.get_node_by_id(e.to_id)
+            return t is not None and t.type == "Observe" and t.status in ("replaced", "branch", "discarded")
+        self.store.edges = [e for e in self.store.edges if not _old_dead_edge(e)]
 
         # 打断重试场景：未被打断的兄弟工具节点应连到新评估节点，
         # 并移除它指向已打断(replaced/branch)评估节点的旧边
@@ -1402,14 +1391,9 @@ class ReactLoop:
                         yield self._emit("node_complete", {"node": target.to_dict(), "graph": self.store.to_dict()})
                         to_visit.append(target.id)
 
-        # 级联废弃后断开存活工具节点→已废弃评估节点的旧边（问题4）
-        self._prune_stale_sibling_edges()
-
-        # 补回废弃链展示边（问题A修复：级联标记后再补边，Observe 已是 replaced/branch）
-        for bid in branch_ids:
-            branch_node = self.store.get_node_by_id(bid)
-            if branch_node:
-                self._restore_branch_display_edges(branch_node)
+        # 级联标记完成 → 统一收敛边类型：两端都废弃的边标记为 Branch 展示边。
+        # 只标记不删除：废弃链永远完整；存活节点的旧边留给新 Observe 诞生时重连。
+        self.store.mark_branch_edges()
 
         # ── 3. 收集截断前的 observe_outputs ──
         observe_outputs = self._collect_observe_outputs_before(step_index)
@@ -1464,6 +1448,17 @@ class ReactLoop:
 
             self._last_raw_results.append(tool_result)
             self._last_tc_node_ids.append(tc_node.id)
+
+        # ── 4.5 存活兄弟节点并入新评估 ──
+        # 同一步未被中断的 done 工具：它们的结果因原评估被打断从未被评估过，
+        # 重试时并入 _last_raw_results/_last_tc_node_ids——
+        # 既让结果参与融合评估，也让节点连到新 Observe，不留 dangling
+        for n in self.store.nodes:
+            if (n.type == "ToolCall" and n.status == "done"
+                    and n.step_index == self.step_index
+                    and n.id not in self._last_tc_node_ids):
+                self._last_tc_node_ids.append(n.id)
+                self._last_raw_results.append(n.data.get("result"))
 
         # ── 5. Observe（流式） ──
         self.step_index += 1
