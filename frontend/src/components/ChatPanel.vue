@@ -347,6 +347,7 @@ function handleScroll() {
 }
 
 // 新 block/chunk 到来时，若用户贴底则自动滚到底
+// watch length 触发新 block，watch 最后 block content 长度触发流式 chunk
 watch(
   () => props.leftBlocks?.length,
   () => {
@@ -355,8 +356,19 @@ watch(
         messagesRef.value.scrollTop = messagesRef.value.scrollHeight
       }
     })
+  }
+)
+watch(
+  () => {
+    const blocks = props.leftBlocks || []
+    const last = blocks[blocks.length - 1]
+    return last ? last.content?.length : 0
   },
-  { deep: true }
+  () => {
+    if (isNearBottom.value && messagesRef.value) {
+      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+    }
+  }
 )
 
 // 新消息到来时也自动滚

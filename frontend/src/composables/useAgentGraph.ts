@@ -59,7 +59,6 @@ export function useAgentGraph() {
     inRetryBranch = false
 
     // 重置图状态
-    leftBlocks.value = []
     graph.value = {
       nodes: [],
       edges: [],
