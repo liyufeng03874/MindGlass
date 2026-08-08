@@ -71,3 +71,11 @@ export interface LeftBlock {
   // 用于并行工具块分组
   parallelGroupId?: string
 }
+
+/** 一轮对话：用户 query + 该轮后端推送的所有事件 block + 最终回答 */
+export interface Round {
+  id: string
+  query: string
+  blocks: LeftBlock[]   // 该轮的思考直播事件（plan/toolcall/observe/answer/divider）
+  answer?: string       // 最终回答（Answer 节点完成后填入）
+}

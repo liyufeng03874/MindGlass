@@ -46,11 +46,10 @@
       <div :class="['left-panel', { full: !showGraph || isMobile }]">
         <ChatPanel
           ref="chatPanelRef"
-          :messages="messages"
+          :rounds="rounds"
           :disabled="isRunning"
           :statusText="status"
           :totalElapsed="isRunning ? null : totalElapsed"
-          :leftBlocks="leftBlocks"
           @send="onSend"
           :initialGreeting="initialGreeting"
         />
@@ -104,7 +103,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
 })
 
-const { graph, status, connected, messages, isRunning, leftBlocks, cutNode, sendMessage, interrupt, clearCut, retryFrom } = useAgentGraph()
+const { graph, status, connected, rounds, clearRounds, isRunning, cutNode, sendMessage, interrupt, clearCut, retryFrom } = useAgentGraph()
 
 // ── 全局相位：从推理状态推导，驱动整站氛围层呼吸（水镜 v2.1 第一遍）──
 const { phase } = usePhase()
@@ -207,13 +206,11 @@ function loadTestData(demoName: string = '1') {
       const answerNode = data.graph?.nodes?.find((n: any) => n.type === 'Answer' && n.status === 'done')
         || data.graph?.nodes?.find((n: any) => n.type === 'Answer' && n.status !== 'replaced')
       if (answerNode?.data?.output) {
-        messages.value.push({
-          role: 'user',
-          content: answerNode.data.input || '测试问题',
-        })
-        messages.value.push({
-          role: 'agent',
-          content: answerNode.data.output,
+        rounds.value.push({
+          id: `round_demo_${Date.now()}`,
+          query: answerNode.data.input || '测试问题',
+          blocks: [],
+          answer: answerNode.data.output,
         })
       }
 
@@ -244,7 +241,7 @@ function loadTestData(demoName: string = '1') {
 
 function clearDemo() {
   graph.value = { nodes: [], edges: [], branches: [], meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' } }
-  messages.value = []
+  clearRounds()
   showGraph.value = true
   demoLoaded.value = false
   demoElapsedLocked.value = false

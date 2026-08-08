@@ -1,5 +1,5 @@
 import {ref} from 'vue'
-import type {AgentNode, ReasoningGraph, SSEEvent, LeftBlock} from '@/types/agent'
+import type {AgentNode, ReasoningGraph, SSEEvent, LeftBlock, Round} from '@/types/agent'
 
 // API 地址：生产环境通过 nginx 反代 /api，开发环境可覆盖 VITE_API_BASE_URL
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
@@ -34,10 +34,29 @@ export function useAgentGraph() {
   const connected = ref(false)
   const isRunning = ref(false)
 
-  /** 左侧思考直播 Block 列表 */
-  const leftBlocks = ref<LeftBlock[]>([])
+  /** 轮次数组：每轮 = 用户 query + 本轮后端推送的事件 blocks + 最终回答 */
+  const rounds = ref<Round[]>([])
+  let roundCounter = 0
 
-  const messages = ref<Array<{ role: 'user' | 'agent', content: string }>>([])
+  /** 当前轮（最近一轮，SSE 事件都写进它） */
+  function currentBlocks(): LeftBlock[] {
+    if (rounds.value.length === 0) {
+      // 兑底：没有轮次时先造一个（demo/异常场景）
+      roundCounter++
+      rounds.value.push({ id: `round_${roundCounter}`, query: '', blocks: [] })
+    }
+    return rounds.value[rounds.value.length - 1].blocks
+  }
+
+  function currentRound(): Round {
+    currentBlocks()
+    return rounds.value[rounds.value.length - 1]
+  }
+
+  /** 清空所有轮次（页面清空用） */
+  function clearRounds() {
+    rounds.value = []
+  }
 
   /** 截断点节点（打断后只有它能点重试；重试或新查询后清空） */
   const cutNode = ref<AgentNode | null>(null)
@@ -48,7 +67,19 @@ export function useAgentGraph() {
   let inRetryBranch = false
 
   function sendMessage(query: string) {
-    messages.value.push({ role: 'user', content: query })
+    // 提取历史对话（最近 3 轮，每条截 200 字）——在新轮入队前取
+    const history = rounds.value.flatMap(r => {
+      const pair: Array<{ role: string, content: string }> = [
+        { role: 'user', content: r.query.slice(0, 200) },
+      ]
+      if (r.answer) pair.push({ role: 'assistant', content: r.answer.slice(0, 200) })
+      return pair
+    }).slice(-6)
+
+    // 新轮入队，后续 SSE 事件全部写进这一轮
+    roundCounter++
+    rounds.value.push({ id: `round_${roundCounter}`, query, blocks: [] })
+
     status.value = '🤔 连接中...'
     connected.value = true
     isRunning.value = true
@@ -63,7 +94,6 @@ export function useAgentGraph() {
       branches: [],
       meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
     }
-
     // 立即显示 pending "规划中..." 节点
     pendingIdCounter++
     graph.value.nodes.push({
@@ -76,11 +106,7 @@ export function useAgentGraph() {
       label: '规划中...',
     })
 
-    // 提取历史对话（最近 3 轮，每条截 200 字）
-    const history = messages.value
-      .filter(m => m.role === 'user' || m.role === 'agent')
-      .map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.content.slice(0, 200) }))
-      .slice(-6)  // 最近 3 轮
+    // 提取历史对话（最近 3 轮，每条截 200 字）——在新轮入队前取
 
     // 用 fetch POST 发送请求（EventSource 只支持 GET，URL 长度有限制）
     fetch(`${API_BASE}/api/run`, {
@@ -156,13 +182,14 @@ export function useAgentGraph() {
         break
 
       case 'node_streaming': {
-        // 流式内容追加到 leftBlocks
+        // 流式内容追加到当前轮的 blocks
         const { node_id, node_type, content, is_complete, chunk } = event.data
         const blockType = nodeTypeToBlockType(node_type)
         const blockId = `block_${node_id}`
         const title = BLOCK_TITLES[node_type] || node_type
 
-        let block = leftBlocks.value.find((b: LeftBlock) => b.id === blockId)
+        const blocks = currentBlocks()
+        let block = blocks.find((b: LeftBlock) => b.id === blockId)
         if (!block) {
           block = {
             id: blockId,
@@ -173,7 +200,7 @@ export function useAgentGraph() {
             content: '',
             phase: inRetryBranch ? 'retry' : undefined,
           }
-          leftBlocks.value.push(block)
+          blocks.push(block)
         }
         // chunk 里的报错提示（后端异常时会塞在 chunk 里）拼进 content，不让错误被静默吞掉
         if (typeof chunk === 'string' && (chunk.startsWith('[流式调用出错') || chunk.startsWith('[LLM 流式调用超时'))) {
@@ -227,11 +254,12 @@ export function useAgentGraph() {
           }
         }
 
-        // ToolCall 类型 → 填充 leftBlocks 的 metadata（toolName/params/resultPreview）
+        // ToolCall 类型 → 填充当前轮 blocks 的 metadata（toolName/params/resultPreview）
         if (node.type === 'ToolCall') {
           const blockType: LeftBlock['type'] = 'toolcall'
           const blockId = `block_${node.id}`
-          let block = leftBlocks.value.find((b: LeftBlock) => b.id === blockId)
+          const blocks = currentBlocks()
+          let block = blocks.find((b: LeftBlock) => b.id === blockId)
 
           // 后端 node_complete 事件将 tool_name/params/result_preview/result_full 放在 event.data 顶层
           const toolName = event.data.tool_name || node.data?.tool || ''
@@ -257,7 +285,7 @@ export function useAgentGraph() {
               parallelGroupId: node.data?.parallel_group_id,
               phase: inRetryBranch ? 'retry' : undefined,
             }
-            leftBlocks.value.push(block)
+            blocks.push(block)
           } else {
             block.status = node.status === 'error' ? 'error' : 'done'
             // 后端补发 node_complete（branch/replaced 标记等）时不带 result 字段，
@@ -277,7 +305,7 @@ export function useAgentGraph() {
 
         // 非 ToolCall 节点（observe/plan/answer）废弃时同样置灰对应 block（问题2）
         if (node.status === 'branch' || node.status === 'replaced' || node.status === 'discarded') {
-          const anyBlock = leftBlocks.value.find((bb: LeftBlock) => bb.id === `block_${node.id}`)
+          const anyBlock = currentBlocks().find((bb: LeftBlock) => bb.id === `block_${node.id}`)
           if (anyBlock) anyBlock.phase = 'cut'
         }
 
@@ -301,7 +329,7 @@ export function useAgentGraph() {
         if (node.type === 'Answer' && node.status !== 'replaced') {
           // 安全拦截的 Answer 不重复推送（safety_interrupt 事件已推送过）
           if (!node.data?.safety_interrupt) {
-            messages.value.push({ role: 'agent', content: node.data.output })
+            currentRound().answer = node.data.output
             status.value = '✅ 完成'
           } else {
             status.value = '⚠️ 安全策略拦截'
@@ -322,8 +350,8 @@ export function useAgentGraph() {
           graph.value = event.data.graph as ReasoningGraph
           console.log('[Run Complete]', graph.value.nodes.length, 'nodes', graph.value.edges.length, 'edges')
         }
-        // 所有 leftBlocks 标记为 done（run_complete 时确保状态正确）
-        for (const block of leftBlocks.value) {
+        // 当前轮所有 loading 的 block 标记为 done（run_complete 时确保状态正确）
+        for (const block of currentBlocks()) {
           if (block.status === 'loading') {
             block.status = 'done'
           }
@@ -347,14 +375,15 @@ export function useAgentGraph() {
           if (n.type === 'Observe') return d.observe_output ? JSON.stringify(d.observe_output) : (typeof d.summary === 'string' ? d.summary : '')
           return ''
         }
-        // 左侧还在 loading 的流式 block 标记结束；被废弃的 block 标记 phase=cut（置灰）
+        // 当前轮还在 loading 的流式 block 标记结束；被废弃的 block 标记 phase=cut（置灰）
+        const roundBlocks = currentBlocks()
         const interruptedIds = new Set(
           (graphNodes)
             .filter((n: any) => n.data?.interrupted
               || n.status === 'replaced' || n.status === 'branch' || n.status === 'discarded')
             .map((n: any) => n.id)
         )
-        for (const block of leftBlocks.value) {
+        for (const block of roundBlocks) {
           if (block.status === 'loading') block.status = 'done'
           if (interruptedIds.has(block.nodeId)) {
             block.phase = 'cut'
@@ -367,14 +396,14 @@ export function useAgentGraph() {
         }
         // 未流式过的废弃节点（如被打断时还没出现的决策/回答）补成置灰 block，
         // 让左侧聊天完整呈现"被打断侧"的后续链（问题2）
-        const existingIds = new Set(leftBlocks.value.map(b => b.nodeId))
+        const existingIds = new Set(roundBlocks.map(b => b.nodeId))
         const missedNodes = graphNodes
           .filter((n: any) => (n.status === 'replaced' || n.status === 'branch')
             && !existingIds.has(n.id)
             && ['Plan', 'Observe', 'Answer', 'ToolCall'].includes(n.type))
           .sort((a: any, b: any) => (a.step_index ?? 0) - (b.step_index ?? 0))
         for (const n of missedNodes) {
-          leftBlocks.value.push({
+          roundBlocks.push({
             id: `block_${n.id}`,
             nodeId: n.id,
             type: nodeTypeToBlockType(n.type),
@@ -394,7 +423,7 @@ export function useAgentGraph() {
           })
         }
         // 分割线：打断边界
-        leftBlocks.value.push({
+        roundBlocks.push({
           id: `divider_cut_${Date.now()}`,
           nodeId: '',
           type: 'divider',
@@ -411,15 +440,15 @@ export function useAgentGraph() {
       case 'safety_interrupt': {
         // 安全策略拦截：清空当前回答，显示拦截提示
         const interruptText = event.data.text || '很抱歉，该回答包含不合规内容，已被安全策略拦截。'
-        // 清空左侧 Answer block 的内容，替换为拦截提示
-        const answerBlock = leftBlocks.value.find((b: LeftBlock) => b.type === 'answer')
+        // 清空当前轮 Answer block 的内容，替换为拦截提示
+        const answerBlock = currentBlocks().find((b: LeftBlock) => b.type === 'answer')
         if (answerBlock) {
           answerBlock.content = interruptText
           answerBlock.status = 'error'
           answerBlock.title = '⚠️ 安全拦截'
         }
-        // 右侧消息也显示拦截提示
-        messages.value.push({ role: 'agent', content: `⚠️ ${interruptText}` })
+        // 回答气泡也显示拦截提示
+        currentRound().answer = `⚠️ ${interruptText}`
         status.value = '⚠️ 安全策略拦截'
         isRunning.value = false
         connected.value = false
@@ -534,7 +563,8 @@ export function useAgentGraph() {
     // 重试开始后清除截断点状态，进入重试分支
     cutNode.value = null
     inRetryBranch = true
-    leftBlocks.value.push({
+    // 重试属于同一轮对话，分割线追加到当前轮
+    currentBlocks().push({
       id: `divider_retry_${Date.now()}`,
       nodeId: '',
       type: 'divider',
@@ -690,8 +720,8 @@ export function useAgentGraph() {
     status,
     connected,
     isRunning,
-    messages,
-    leftBlocks,
+    rounds,
+    clearRounds,
     cutNode,
     sendMessage,
     interrupt,
