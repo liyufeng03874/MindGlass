@@ -161,14 +161,6 @@ const loadingDemo = ref(false)
 /** demo 加载时手动算过耗时，watch 不要覆盖 */
 const demoElapsedLocked = ref(false)
 
-/** 手机端检测（用于手机端单面板切换导航） */
-const isMobile = ref(false)
-function updateMobile() {
-  isMobile.value = window.innerWidth < 768
-}
-updateMobile()
-window.addEventListener('resize', updateMobile)
-
 const initialGreeting = '你好，我是思镜 ✨\n\n我是一面照见思考的镜子——把一个复杂问题拆成一步步推理，全过程摊开在你眼前。投一个问题进来，看思绪如何成形吧～'
 
 function onSend(query: string) {

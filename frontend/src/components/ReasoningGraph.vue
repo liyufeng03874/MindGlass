@@ -1025,6 +1025,85 @@ label {
   color: #6b6b80;
   cursor: not-allowed;
 }
+
+/* ═══ 手机端响应式增强 ═══ */
+@media (max-width: 767px) {
+  .editor-panel {
+    height: 75%;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .panel-body {
+    padding: 12px;
+    font-size: 14px;
+  }
+
+  .panel-header {
+    padding: 12px;
+  }
+
+  .panel-header h3 {
+    font-size: 15px;
+  }
+
+  .node-info {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  label {
+    font-size: 14px;
+  }
+
+  .input-field,
+  .textarea-field,
+  .select-field {
+    font-size: 16px; /* 防止 iOS 缩放 */
+    padding: 10px 12px;
+  }
+
+  .output-content {
+    font-size: 13px;
+    padding: 10px;
+  }
+
+  .step-list {
+    font-size: 14px;
+  }
+
+  .step-tool {
+    font-size: 13px;
+  }
+
+  .decision-banner {
+    font-size: 13px;
+    padding: 6px 10px;
+  }
+
+  .retry-btn {
+    padding: 12px;
+    font-size: 15px;
+  }
+
+  .panel-footer {
+    padding: 12px;
+  }
+
+  .deprecated-modal {
+    width: 96%;
+    max-height: 85%;
+    border-radius: 16px;
+  }
+
+  .deprecated-body {
+    padding: 14px 16px;
+    font-size: 14px;
+  }
+
+  .answer-content {
+    font-size: 14px;
+  }
+}
 </style>
 
 <style>

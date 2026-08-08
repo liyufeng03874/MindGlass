@@ -412,7 +412,7 @@ function highlightLastAnswerBlock() {
     if (el) {
       // 先移除旧动画类，强制浏览器重绘后再添加，确保每次点击都能重新触发动画
       el.classList.remove('answer-block-highlight')
-      void el.offsetWidth  // 强制重绘（reflow）
+      void (el as HTMLElement).offsetWidth  // 强制重绘（reflow）
       el.classList.add('answer-block-highlight')
       setTimeout(() => {
         el.classList.remove('answer-block-highlight')

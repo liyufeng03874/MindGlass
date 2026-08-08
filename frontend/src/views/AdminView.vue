@@ -105,6 +105,7 @@
             v-else-if="replayGraph"
             :graph="replayGraph"
             :isRunning="false"
+            :cutNodeId="null"
           />
         </div>
       </div>
@@ -505,5 +506,112 @@ onMounted(() => {
   justify-content: center;
   height: 100%;
   color: #888;
+}
+
+/* ═══ 手机端响应式适配 ═══ */
+@media (max-width: 767px) {
+  .admin-page {
+    min-height: 100vh;
+  }
+
+  .admin-header {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    gap: 8px;
+  }
+
+  .admin-header h1 {
+    font-size: 17px;
+  }
+
+  .subtitle {
+    font-size: 11px;
+    width: 100%;
+    order: 10;
+  }
+
+  .back-link {
+    font-size: 14px;
+    padding: 6px 14px;
+  }
+
+  /* 指标卡纵向排列 */
+  .overview-cards {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .card {
+    min-width: 0;
+    flex: 1 1 calc(50% - 5px);
+    padding: 12px 16px;
+  }
+
+  .card-value {
+    font-size: 20px;
+  }
+
+  .card-label {
+    font-size: 11px;
+  }
+
+  /* 表格横向滚动 */
+  .run-list-section {
+    padding: 0 10px 20px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .run-table {
+    min-width: 900px; /* 保证表格不被压缩 */
+  }
+
+  .run-table th,
+  .run-table td {
+    padding: 8px 8px;
+    font-size: 12px;
+  }
+
+  /* 分页适配 */
+  .pagination {
+    flex-wrap: wrap;
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .pagination button {
+    padding: 8px 14px;
+    font-size: 14px;
+  }
+
+  .page-info {
+    font-size: 12px;
+    width: 100%;
+    text-align: center;
+  }
+
+  /* 弹窗全屏 */
+  .replay-overlay {
+    padding: 0;
+  }
+
+  .replay-dialog {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  .replay-header {
+    padding: 10px 14px;
+  }
+
+  .replay-header h2 {
+    font-size: 14px;
+  }
+
+  .close-btn {
+    font-size: 13px;
+    padding: 6px 12px;
+  }
 }
 </style>
