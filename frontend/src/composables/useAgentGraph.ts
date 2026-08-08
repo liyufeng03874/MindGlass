@@ -42,9 +42,7 @@ export function useAgentGraph() {
   /** 截断点节点（打断后只有它能点重试；重试或新查询后清空） */
   const cutNode = ref<AgentNode | null>(null)
 
-  /** 当前活跃的 EventSource（打断收流用） */
-  let activeEventSource: EventSource | null = null
-  /** 已收到 interrupted 事件（onerror 不再误报“连接断开”） */
+  /** 已收到 interrupted 事件 */
   let interruptedReceived = false
   /** 重试分支标记：重试开始后的新 block 标记 phase=retry（左侧样式区分） */
   let inRetryBranch = false
@@ -66,16 +64,6 @@ export function useAgentGraph() {
       meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
     }
 
-    // 添加分隔 block，标记新 query 开始
-    leftBlocks.value.push({
-      id: `divider_${Date.now()}`,
-      nodeId: '',
-      type: 'divider',
-      status: 'done',
-      title: query,
-      content: '',
-    })
-
     // 立即显示 pending "规划中..." 节点
     pendingIdCounter++
     graph.value.nodes.push({
@@ -86,16 +74,6 @@ export function useAgentGraph() {
       step_index: 0,
       branch_id: null,
       label: '规划中...',
-    })
-
-    // 添加 divider block 标记新 query 开始
-    leftBlocks.value.push({
-      id: `divider_${Date.now()}`,
-      nodeId: '',
-      type: 'divider',
-      status: 'done',
-      title: query,
-      content: '',
     })
 
     // 提取历史对话（最近 3 轮，每条截 200 字）
@@ -140,20 +118,6 @@ export function useAgentGraph() {
     }).catch(err => {
       console.error('Run error:', err)
     })
-
-    eventSource.onerror = () => {
-      // 打断场景：interrupted 事件已收束，这里主动关闭不算断线
-      if (interruptedReceived) {
-        eventSource.close()
-        activeEventSource = null
-        return
-      }
-      status.value = '连接断开'
-      connected.value = false
-      isRunning.value = false
-      eventSource.close()
-      activeEventSource = null
-    }
   }
 
   /** 打断当前运行：通知后端设中断标志，后端收尾后发 interrupted 事件 */
@@ -370,10 +334,6 @@ export function useAgentGraph() {
       case 'interrupted': {
         // 用户打断：后端已完成收尾（截断点后置灰），前端收束
         interruptedReceived = true
-        if (activeEventSource) {
-          activeEventSource.close()
-          activeEventSource = null
-        }
         if (event.data.graph) {
           graph.value = event.data.graph as ReasoningGraph
         }
