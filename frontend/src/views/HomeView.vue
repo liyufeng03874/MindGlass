@@ -478,7 +478,7 @@ function clearDemo() {
   /* 手机端底部导航 */
   .mobile-nav {
     display: flex;
-    position: absolute;
+    position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
