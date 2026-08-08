@@ -78,8 +78,15 @@ export function useAgentGraph() {
       label: '规划中...',
     })
 
+    // 提取历史对话（之前的 user query + AI final answer，不含当前这条）
+    const history = messages.value
+      .filter(m => m.role === 'user' || m.role === 'agent')
+      .map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.content }))
+      .slice(-6)  // 最近3轮
+    const historyParam = history.length > 0 ? `&history=${encodeURIComponent(JSON.stringify(history))}` : ''
+
     const eventSource = new EventSource(
-      `${API_BASE}/api/run?query=${encodeURIComponent(query)}`
+      `${API_BASE}/api/run?query=${encodeURIComponent(query)}${historyParam}`
     )
     activeEventSource = eventSource
 

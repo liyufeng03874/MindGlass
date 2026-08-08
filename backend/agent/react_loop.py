@@ -430,7 +430,14 @@ class ReactLoop:
 
         # 构建 prompt
         if plan_count == 1:
-            prompt = f"用户查询: {self.query}\n\n请拆解为可执行步骤："
+            history_text = ""
+            if self.history:
+                history_text = "\n\n=== 历史对话 ===\n"
+                for h in self.history[-6:]:
+                    role = "用户" if h.get("role") == "user" else "助手"
+                    history_text += f"{role}: {h.get('content', '')[:500]}\n"
+                history_text += "=== 历史对话结束 ===\n\n"
+            prompt = f"用户查询: {self.query}{history_text}\n请拆解为可执行步骤："
             messages = [
                 {"role": "system", "content": PLANNING_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
@@ -815,7 +822,14 @@ class ReactLoop:
                 context_parts.append(f"\n## 决策说明\n{reasoning}")
 
         context = "\n\n".join(context_parts)
-        prompt = f"""用户问题: {self.query}
+        history_text = ""
+        if self.history:
+            history_text = "\n\n=== 历史对话 ===\n"
+            for h in self.history[-6:]:
+                role = "用户" if h.get("role") == "user" else "助手"
+                history_text += f"{role}: {h.get('content', '')[:500]}\n"
+            history_text += "=== 历史对话结束 ===\n"
+        prompt = f"""用户问题: {self.query}{history_text}
 
 收集到的结构化评估报告:
 {context}
@@ -1080,7 +1094,7 @@ class ReactLoop:
 
     # ── 主循环 ──
 
-    async def run(self, query: str) -> AsyncGenerator[str, None]:
+    async def run(self, query: str, history: list = None) -> AsyncGenerator[str, None]:
         """
         执行决策循环（v2）：
         Plan(1) → [ToolCall → Observe → Plan(N)]* → Answer
@@ -1089,6 +1103,7 @@ class ReactLoop:
         v2.2：Plan/Observe/Answer 全部使用流式推送（node_streaming 事件）。
         """
         self.query = query
+        self.history = history or []
         self.store.reset()
         self.store.meta.run_id = self.run_id
         self.store.meta.query = query

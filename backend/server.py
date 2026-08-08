@@ -66,11 +66,20 @@ def get_graph():
 
 
 @app.get("/api/run")
-async def run_agent(query: str = Query(...)):
+async def run_agent(query: str = Query(...), history: str = Query(default="")):
     """
     启动 ReAct 推理（SSE 流式推送）
     返回 SSE stream，逐步推送节点和状态
+    history: JSON 字符串，格式 [{"role":"user","content":"..."},{"role":"assistant","content":"..."}]
     """
+    # 解析历史对话
+    history_msgs = []
+    if history:
+        try:
+            history_msgs = json.loads(history)
+        except Exception:
+            history_msgs = []
+
     loop = ReactLoop(_store)
 
     async def event_stream():
@@ -78,7 +87,7 @@ async def run_agent(query: str = Query(...)):
         global _active_loop
         _active_loop = loop
         try:
-            async for event in loop.run(query):
+            async for event in loop.run(query, history_msgs):
                 yield event
         finally:
             _active_loop = None
