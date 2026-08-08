@@ -65,20 +65,18 @@ def get_graph():
     return _store.to_dict()
 
 
-@app.get("/api/run")
-async def run_agent(query: str = Query(...), history: str = Query(default="")):
+@app.post("/api/run")
+async def run_agent(request: dict):
     """
     启动 ReAct 推理（SSE 流式推送）
     返回 SSE stream，逐步推送节点和状态
-    history: JSON 字符串，格式 [{"role":"user","content":"..."},{"role":"assistant","content":"..."}]
+    body: {"query": "...", "history": [{"role":"user","content":"..."}]}
     """
-    # 解析历史对话
-    history_msgs = []
-    if history:
-        try:
-            history_msgs = json.loads(history)
-        except Exception:
-            history_msgs = []
+    query = request.get("query", "")
+    history_msgs = request.get("history", [])
+    
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
 
     loop = ReactLoop(_store)
 
