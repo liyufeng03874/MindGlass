@@ -56,15 +56,15 @@
 - **PC 不变**: 所有响应式样式只在 `max-width: 767px` 生效
 
 ## 已知 TS 错误（非本次引入）
-- `ChatPanel.vue`: `offsetWidth` 类型问题
-- `useAgentGraph.ts`: `interrupted`/`safety_interrupt` 类型比较
-- 这些是已有问题，不影响 vite 构建
+- ~~`ChatPanel.vue`: `offsetWidth` 类型问题~~ ✅ 已修复（`el as HTMLElement`）
+- ~~`useAgentGraph.ts`: `interrupted`/`safety_interrupt` 类型比较~~ ✅ 已修复（添加到 SSEEvent 类型）
+- 构建已通过（`npm run build` 无错误）
 
 ## 改了哪些文件
-- `frontend/package.json` / `package-lock.json` - 新增 tailwindcss/postcss/autoprefixer
-- `frontend/tailwind.config.js` - 新建
-- `frontend/postcss.config.js` - 新建
-- `frontend/src/style.css` - 添加 @tailwind 指令
+- `frontend/package.json` / `package-lock.json` - 新增 tailwindcss/@tailwindcss/vite
+- `frontend/vite.config.ts` - 配置 @tailwindcss/vite 插件
+- `frontend/src/style.css` - 添加 @import "tailwindcss" 指令
+- `frontend/src/types/agent.ts` - 修复 SSEEvent 类型（添加 interrupted/safety_interrupt）
 - `frontend/src/views/HomeView.vue` - 手机端布局 + 底部导航
 - `frontend/src/components/ChatPanel.vue` - 手机端响应式样式
 - `frontend/src/components/ReasoningGraph.vue` - 编辑面板 + 弹窗适配

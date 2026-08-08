@@ -48,7 +48,7 @@ export interface ReasoningGraph {
 
 /** SSE 事件类型 */
 export interface SSEEvent {
-  type: 'node_streaming' | 'node_complete' | 'status' | 'run_complete' | 'error'
+  type: 'node_streaming' | 'node_complete' | 'status' | 'run_complete' | 'error' | 'interrupted' | 'safety_interrupt'
   data: Record<string, any>
 }
 
