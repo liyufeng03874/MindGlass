@@ -1,3 +1,8 @@
+/* Tailwind CSS 指令 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* ============================================================
    思镜 · 全局主题（水镜 / 星河）v2.1
    深空背景 · 玻璃面板 · 相位语义色

@@ -783,6 +783,13 @@ const displayItems = computed<DisplayItem[]>(() => {
   gap: 12px;
 }
 
+@media (max-width: 768px) {
+  .messages {
+    padding: 12px;
+    gap: 10px;
+  }
+}
+
 /* 关键：直接子元素永不压缩——内容超出时由容器滚动，而不是挤压板块 */
 .messages > * {
   flex-shrink: 0;
@@ -827,6 +834,14 @@ const displayItems = computed<DisplayItem[]>(() => {
   font-size: 14px;
   line-height: 1.5;
   word-break: break-word;
+}
+
+@media (max-width: 768px) {
+  .bubble {
+    max-width: 90%;
+    font-size: 15px;
+    padding: 12px 16px;
+  }
 }
 
 .message.user .bubble {
@@ -1342,6 +1357,12 @@ const displayItems = computed<DisplayItem[]>(() => {
   padding: 8px;
 }
 
+@media (max-width: 768px) {
+  .tool-parallel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .parallel-card {
   margin: 0;
 }
@@ -1377,6 +1398,13 @@ const displayItems = computed<DisplayItem[]>(() => {
   border-top: 1px solid var(--panel-border);
   display: flex;
   gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .input-area {
+    padding: 10px 12px;
+    gap: 6px;
+  }
 }
 
 .input {
@@ -1671,5 +1699,99 @@ const displayItems = computed<DisplayItem[]>(() => {
   content: ' · 重试';
   color: #fbbf24;
   font-size: 11px;
+}
+
+/* ═══ 手机端响应式适配 ═══ */
+@media (max-width: 767px) {
+  .chat-panel {
+    border-right: none;
+    box-shadow: none;
+  }
+
+  .messages {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .message {
+    gap: 6px;
+  }
+
+  .avatar {
+    font-size: 20px;
+  }
+
+  .greeting-avatar,
+  .bot-avatar {
+    filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.3));
+  }
+
+  .bot-avatar {
+    transform: scale(0.85);
+  }
+
+  .bubble {
+    font-size: 15px;
+    padding: 11px 15px;
+    max-width: 92%;
+  }
+
+  /* 并行工具组改为单列 */
+  .tool-parallel-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .thought-title {
+    font-size: 14px;
+  }
+
+  .thought-content {
+    font-size: 14px;
+    padding: 10px;
+  }
+
+  .readable-text,
+  .readable-steps {
+    font-size: 14px;
+  }
+
+  .readable-label {
+    font-size: 13px;
+  }
+
+  .result-title {
+    font-size: 14px;
+  }
+
+  .result-snippet {
+    font-size: 13px;
+  }
+
+  .back-to-bottom {
+    bottom: 65px;
+    padding: 8px 18px;
+    font-size: 13px;
+  }
+
+  .input-area {
+    padding: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .input {
+    font-size: 16px; /* 防止 iOS 缩放 */
+    padding: 10px 14px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .send-btn {
+    padding: 10px 20px;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
 }
 </style>

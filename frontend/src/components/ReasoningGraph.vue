@@ -515,6 +515,13 @@ watch(
   animation: emptyFloat 4s ease-in-out infinite;
 }
 
+@media (max-width: 768px) {
+  .empty-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+  }
+}
+
 .empty-title {
   font-size: 19px;
   color: var(--text);
@@ -523,10 +530,23 @@ watch(
   text-shadow: 0 0 24px rgba(167, 139, 250, 0.3);
 }
 
+@media (max-width: 768px) {
+  .empty-title {
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+}
+
 .empty-sub {
   font-size: 13px;
   color: var(--text-dim);
   letter-spacing: 1px;
+}
+
+@media (max-width: 768px) {
+  .empty-sub {
+    font-size: 12px;
+  }
 }
 
 @keyframes emptyFloat {
@@ -554,6 +574,25 @@ watch(
   display: flex;
   flex-direction: column;
   z-index: 100;
+}
+
+@media (max-width: 768px) {
+  .editor-panel {
+    width: 100%;
+    right: auto;
+    left: 0;
+    top: auto;
+    bottom: -100%;
+    height: 70%;
+    border-left: none;
+    border-top: 1px solid rgba(96, 165, 250, 0.4);
+    box-shadow: 0 -4px 24px rgba(96, 165, 250, 0.15), 0 -2px 0 rgba(96, 165, 250, 0.1);
+    transition: bottom 0.3s ease;
+  }
+  .panel-open {
+    bottom: 0;
+    right: auto;
+  }
 }
 
 /* 侧边面板 + 废弃弹窗滚动条主题化（与左侧水镜统一） */
@@ -610,6 +649,13 @@ watch(
   flex-direction: column;
   overflow: hidden;
   border-top: 3px solid rgba(192, 192, 220, 0.5);
+}
+
+@media (max-width: 768px) {
+  .deprecated-modal {
+    width: 96%;
+    max-height: 80%;
+  }
 }
 
 .deprecated-modal .panel-header {

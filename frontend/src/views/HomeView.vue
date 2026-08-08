@@ -1,8 +1,10 @@
 <template>
   <div class="mindglass">
     <header class="header">
-      <h1><MirrorIcon :size="22" class="title-icon" /> 思镜</h1>
-      <span class="subtitle">照见思考的镜子 · 可观测多步推理 Agent</span>
+      <div class="header-top">
+        <h1><MirrorIcon :size="22" class="title-icon" /> 思镜</h1>
+        <span class="subtitle">照见思考的镜子 · 可观测多步推理 Agent</span>
+      </div>
       <div class="status-bar">
         <span :class="['status-dot', { active: connected }]"></span>
         <span>{{ status || '就绪' }}</span>
@@ -32,16 +34,16 @@
             class="toggle-graph-btn"
             @click="showGraph = !showGraph"
           >
-            {{ showGraph ? '👁️ 隐藏思维' : '💡 思维可视化' }}
+            {{ showGraph ? '👁️ 隐藏' : '💡 思维' }}
           </button>
         </template>
         <!-- Admin 入口：新开标签页，不覆盖当前页 -->
-        <a href="/admin" target="_blank" rel="noopener" class="admin-link">🔧 后台管理</a>
+        <a href="/admin" target="_blank" rel="noopener" class="admin-link">🔧</a>
       </div>
     </header>
 
-    <main class="main-content">
-      <div :class="['left-panel', { full: !showGraph }]">
+    <main class="main-content" :class="{ 'show-graph': showGraph && isMobile }">
+      <div :class="['left-panel', { full: !showGraph || isMobile }]">
         <ChatPanel
           ref="chatPanelRef"
           :messages="messages"
@@ -65,17 +67,42 @@
           />
         </div>
       </transition>
+
+      <!-- 手机端底部导航栏 -->
+      <div v-if="isMobile" class="mobile-nav">
+        <button
+          :class="['nav-btn', { active: !showGraph }]"
+          @click="showGraph = false"
+        >💬 对话</button>
+        <button
+          :class="['nav-btn', { active: showGraph }]"
+          @click="showGraph = true"
+        >🧠 思维</button>
+      </div>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ReasoningGraph from '../components/ReasoningGraph.vue'
 import MirrorIcon from '../components/MirrorIcon.vue'
 import { useAgentGraph } from '../composables/useAgentGraph'
 import { usePhase, derivePhase } from '../composables/usePhase'
+
+// ── 手机端检测 ──
+const isMobile = ref(false)
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
 
 const { graph, status, connected, messages, isRunning, leftBlocks, cutNode, sendMessage, interrupt, clearCut, retryFrom } = useAgentGraph()
 
@@ -133,6 +160,15 @@ const demoLoaded = ref(false)
 const loadingDemo = ref(false)
 /** demo 加载时手动算过耗时，watch 不要覆盖 */
 const demoElapsedLocked = ref(false)
+
+/** 手机端检测（用于手机端单面板切换导航） */
+const isMobile = ref(false)
+function updateMobile() {
+  isMobile.value = window.innerWidth < 768
+}
+updateMobile()
+window.addEventListener('resize', updateMobile)
+
 const initialGreeting = '你好，我是思镜 ✨\n\n我是一面照见思考的镜子——把一个复杂问题拆成一步步推理，全过程摊开在你眼前。投一个问题进来，看思绪如何成形吧～'
 
 function onSend(query: string) {
@@ -247,6 +283,33 @@ function clearDemo() {
   gap: 16px;
   position: relative;
   z-index: 2;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  .header h1 {
+    font-size: 17px;
+  }
+  .subtitle {
+    font-size: 11px;
+  }
+  .status-bar {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 }
 
 .header h1 {
@@ -371,10 +434,84 @@ function clearDemo() {
 /* 左翼聊天：半透明玻璃，星空隐约透出（不加 backdrop-blur，以免抹平星点） */
 .left-panel {
   width: 50%;
-  min-width: 640px;
+  min-width: 320px;
   border-right: 1px solid var(--panel-border);
   background: rgba(10, 14, 31, 0.5);
   transition: width 0.3s ease;
+}
+
+@media (max-width: 768px) {
+  .left-panel {
+    width: 100% !important;
+    min-width: 100%;
+    border-right: none;
+  }
+  .left-panel.full {
+    height: 100%;
+  }
+  .right-panel {
+    width: 100%;
+    flex: unset;
+  }
+  .main-content {
+    flex-direction: column;
+    position: relative;
+  }
+  .main-content > .left-panel {
+    height: 50%;
+    padding-bottom: 56px;
+  }
+  .main-content > .right-panel {
+    height: 50%;
+    padding-bottom: 56px;
+  }
+  /* 手机端：推理图全屏时隐藏聊天 */
+  .main-content.show-graph > .left-panel {
+    display: none;
+  }
+  .main-content.show-graph > .right-panel {
+    height: 100%;
+  }
+  /* 手机端底部导航 */
+  .mobile-nav {
+    display: flex;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background: rgba(10, 14, 31, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--panel-border);
+    padding: 6px 8px;
+    gap: 8px;
+  }
+  .nav-btn {
+    flex: 1;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .nav-btn.active {
+    background: rgba(167, 139, 250, 0.15);
+    border-color: var(--accent);
+    color: var(--text-h);
+  }
+  /* 面板滑入动画：从下方进入 */
+  .slide-enter-from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  .slide-leave-to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
 }
 
 .left-panel.full {
