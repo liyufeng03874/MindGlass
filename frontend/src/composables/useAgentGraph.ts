@@ -66,6 +66,16 @@ export function useAgentGraph() {
       meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
     }
 
+    // 添加分隔 block，标记新 query 开始
+    leftBlocks.value.push({
+      id: `divider_${Date.now()}`,
+      nodeId: '',
+      type: 'divider',
+      status: 'done',
+      title: query,
+      content: '',
+    })
+
     // 立即显示 pending "规划中..." 节点
     pendingIdCounter++
     graph.value.nodes.push({
@@ -76,6 +86,16 @@ export function useAgentGraph() {
       step_index: 0,
       branch_id: null,
       label: '规划中...',
+    })
+
+    // 添加 divider block 标记新 query 开始
+    leftBlocks.value.push({
+      id: `divider_${Date.now()}`,
+      nodeId: '',
+      type: 'divider',
+      status: 'done',
+      title: query,
+      content: '',
     })
 
     // 提取历史对话（最近 3 轮，每条截 200 字）
