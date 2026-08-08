@@ -78,26 +78,48 @@ export function useAgentGraph() {
       label: '规划中...',
     })
 
-    // 提取历史对话（之前的 user query + AI final answer，不含当前这条）
+    // 提取历史对话（最近 3 轮，每条截 200 字）
     const history = messages.value
       .filter(m => m.role === 'user' || m.role === 'agent')
-      .map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.content }))
-      .slice(-6)  // 最近3轮
-    const historyParam = history.length > 0 ? `&history=${encodeURIComponent(JSON.stringify(history))}` : ''
+      .map(m => ({ role: m.role === 'agent' ? 'assistant' : 'user', content: m.content.slice(0, 200) }))
+      .slice(-6)  // 最近 3 轮
 
-    const eventSource = new EventSource(
-      `${API_BASE}/api/run?query=${encodeURIComponent(query)}${historyParam}`
-    )
-    activeEventSource = eventSource
-
-    eventSource.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data) as SSEEvent
-        handleEvent(parsed)
-      } catch (e) {
-        console.error('SSE parse error:', e)
+    // 用 fetch POST 发送请求（EventSource 只支持 GET，URL 长度有限制）
+    fetch(`${API_BASE}/api/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, history }),
+    }).then(async response => {
+      if (!response.ok || !response.body) {
+        console.error('Run failed:', response.status)
+        return
       }
-    }
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''  // 保留未完成的行
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(line.slice(6)) as SSEEvent
+              handleEvent(parsed)
+            } catch (e) {
+              // 忽略解析错误
+            }
+          }
+        }
+      }
+    }).catch(err => {
+      console.error('Run error:', err)
+    })
 
     eventSource.onerror = () => {
       // 打断场景：interrupted 事件已收束，这里主动关闭不算断线

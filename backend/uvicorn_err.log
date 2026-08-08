@@ -1,0 +1,319 @@
+INFO:     Will watch for changes in these directories: ['D:\\code\\mindglass\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [42320] using WatchFiles
+INFO:     Started server process [42960]
+INFO:     Waiting for application startup.
+2026-08-06 22:59:47.404783: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-06 22:59:50.659526: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [42960]
+WARNING:  WatchFiles detected changes in 'server.py', 'agent\react_loop.py'. Reloading...
+INFO:     Started server process [44428]
+INFO:     Waiting for application startup.
+2026-08-06 23:36:59.215053: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-06 23:37:02.024076: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [44428]
+INFO:     Started server process [41332]
+INFO:     Waiting for application startup.
+2026-08-06 23:37:15.287101: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-06 23:37:17.799059: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [41332]
+WARNING:  WatchFiles detected changes in 'moderation\scripts\generate_supplement.py'. Reloading...
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000011EB6F4B7E0>
+Traceback (most recent call last):
+  File "D:\miniconda3\envs\aivenv\Lib\asyncio\base_events.py", line 728, in __del__
+    self.close()
+  File "D:\miniconda3\envs\aivenv\Lib\asyncio\selector_events.py", line 104, in close
+    self._close_self_pipe()
+  File "D:\miniconda3\envs\aivenv\Lib\asyncio\selector_events.py", line 111, in _close_self_pipe
+    self._remove_reader(self._ssock.fileno())
+                        ^^^^^^^^^^^
+AttributeError: '_WindowsSelectorEventLoop' object has no attribute '_ssock'
+D:\miniconda3\envs\aivenv\Lib\site-packages\uvicorn\_subprocess.py:84: RuntimeWarning: coroutine 'Server.serve' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+INFO:     Started server process [33884]
+INFO:     Waiting for application startup.
+2026-08-07 00:08:57.041752: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 00:09:00.354863: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [33884]
+INFO:     Started server process [44512]
+INFO:     Waiting for application startup.
+2026-08-07 00:16:55.796823: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 00:16:58.178316: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [44512]
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Started server process [35592]
+INFO:     Waiting for application startup.
+2026-08-07 00:35:09.739618: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 00:35:12.305220: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [35592]
+INFO:     Started server process [40276]
+INFO:     Waiting for application startup.
+2026-08-07 00:35:23.489988: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 00:35:25.732738: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [40276]
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Started server process [37472]
+INFO:     Waiting for application startup.
+2026-08-07 00:40:26.590802: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 00:40:28.308476: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [37472]
+INFO:     Started server process [19192]
+INFO:     Waiting for application startup.
+2026-08-07 00:40:38.423011: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 00:40:39.942700: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'moderation\scripts\split_data.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [19192]
+WARNING:  WatchFiles detected changes in 'moderation\scripts\train_bert.py'. Reloading...
+INFO:     Started server process [29528]
+INFO:     Waiting for application startup.
+2026-08-07 01:24:40.972589: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 01:24:44.687451: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [29528]
+INFO:     Started server process [45948]
+INFO:     Waiting for application startup.
+2026-08-07 01:25:07.057645: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 01:25:10.415888: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'moderation\scripts\acceptance_test.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45948]
+INFO:     Started server process [43752]
+INFO:     Waiting for application startup.
+2026-08-07 01:27:28.157631: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 01:27:31.117043: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'moderation\scripts\acceptance_test.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [43752]
+WARNING:  WatchFiles detected changes in 'moderation\scripts\add_short_violations.py'. Reloading...
+INFO:     Started server process [45652]
+INFO:     Waiting for application startup.
+2026-08-07 01:32:06.940442: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 01:32:08.525054: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45652]
+INFO:     Started server process [36032]
+INFO:     Waiting for application startup.
+2026-08-07 01:32:18.687742: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 01:32:20.260955: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [36032]
+INFO:     Started server process [45100]
+INFO:     Waiting for application startup.
+2026-08-07 02:23:07.409070: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 02:23:10.723122: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45100]
+INFO:     Started server process [45184]
+INFO:     Waiting for application startup.
+2026-08-07 02:45:27.424708: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 02:45:30.163317: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45184]
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Started server process [37796]
+INFO:     Waiting for application startup.
+2026-08-07 03:15:40.921085: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 03:15:43.411405: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [37796]
+INFO:     Started server process [19072]
+INFO:     Waiting for application startup.
+2026-08-07 03:15:54.536578: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 03:15:56.655672: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [19072]
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Started server process [31316]
+INFO:     Waiting for application startup.
+2026-08-07 03:36:28.864723: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 03:36:31.616786: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [31316]
+INFO:     Started server process [45184]
+INFO:     Waiting for application startup.
+2026-08-07 03:36:42.546869: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 03:36:44.492033: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [45184]
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+Exception ignored in: <function BaseEventLoop.__del__ at 0x00000242B13BB7E0>
+Traceback (most recent call last):
+  File "D:\miniconda3\envs\aivenv\Lib\asyncio\base_events.py", line 728, in __del__
+    self.close()
+  File "D:\miniconda3\envs\aivenv\Lib\asyncio\selector_events.py", line 104, in close
+    self._close_self_pipe()
+  File "D:\miniconda3\envs\aivenv\Lib\asyncio\selector_events.py", line 111, in _close_self_pipe
+    self._remove_reader(self._ssock.fileno())
+                        ^^^^^^^^^^^
+AttributeError: '_WindowsSelectorEventLoop' object has no attribute '_ssock'
+D:\miniconda3\envs\aivenv\Lib\site-packages\uvicorn\_subprocess.py:84: RuntimeWarning: coroutine 'Server.serve' was never awaited
+  pass
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+INFO:     Started server process [46292]
+INFO:     Waiting for application startup.
+2026-08-07 12:32:17.437756: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 12:32:21.220321: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46292]
+INFO:     Started server process [48268]
+INFO:     Waiting for application startup.
+2026-08-07 12:51:56.303711: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 12:51:59.499829: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'state\store.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [48268]
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Started server process [46224]
+INFO:     Waiting for application startup.
+2026-08-07 13:19:24.198513: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 13:19:27.531517: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [46224]
+INFO:     Started server process [38420]
+INFO:     Waiting for application startup.
+2026-08-07 13:19:50.232528: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 13:19:54.169444: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [38420]
+WARNING:  WatchFiles detected changes in 'state\store.py', 'agent\react_loop.py'. Reloading...
+INFO:     Started server process [47516]
+INFO:     Waiting for application startup.
+2026-08-07 13:24:38.635607: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 13:24:42.444221: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [47516]
+INFO:     Started server process [15476]
+INFO:     Waiting for application startup.
+2026-08-07 13:24:54.623134: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 13:24:56.432437: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'agent\react_loop.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [15476]
+INFO:     Started server process [44080]
+INFO:     Waiting for application startup.
+2026-08-07 20:14:13.816387: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 20:14:17.100474: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'moderation\predict.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [44080]
+INFO:     Started server process [48960]
+INFO:     Waiting for application startup.
+2026-08-07 21:17:10.597618: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2026-08-07 21:17:12.923070: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'moderation\predict.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [48960]
+INFO:     Started server process [45860]
+INFO:     Waiting for application startup.
+D:\miniconda3\envs\aivenv\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py:123: UserWarning: Specified provider 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecutionProvider'
+  warnings.warn(
+INFO:     Application startup complete.
