@@ -302,6 +302,10 @@ function clearDemo() {
     flex-wrap: wrap;
     gap: 8px;
   }
+  .admin-link {
+    margin-left: auto;
+    display: none;
+  }
 }
 
 .header h1 {
@@ -452,6 +456,13 @@ function clearDemo() {
   .main-content > .left-panel {
     height: 50%;
     padding-bottom: 56px;
+  }
+  /* 对话 tab：左面板撑满 */
+  .main-content:not(.show-graph) > .left-panel {
+    height: calc(100% - 56px);
+  }
+  .main-content:not(.show-graph) > .right-panel {
+    display: none;
   }
   .main-content > .right-panel {
     height: 50%;

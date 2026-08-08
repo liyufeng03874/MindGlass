@@ -259,9 +259,10 @@
       </div>
     </div>
 
-    <!-- 回到最新按钮 -->
+    <!-- 回到底部按钮 -->
     <button v-if="showBackToBottom" class="back-to-bottom" @click="scrollToBottom">
-      ↓ 回到最新
+      <span class="pc-text">↓ 回到底部</span>
+      <span class="mobile-arrow">↓</span>
     </button>
 
     <div class="input-area">
@@ -1371,13 +1372,12 @@ const displayItems = computed<DisplayItem[]>(() => {
   font-size: 12px;
 }
 
-/* 回到最新按钮 */
+/* 回到底部按钮 */
 .back-to-bottom {
   position: absolute;
   bottom: 70px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 6px 16px;
+  right: 16px;
+  padding: 6px 12px;
   background: var(--panel-bg);
   color: var(--accent);
   border: 1px solid var(--accent);
@@ -1392,6 +1392,9 @@ const displayItems = computed<DisplayItem[]>(() => {
 .back-to-bottom:hover {
   background: rgba(167, 139, 250, 0.15);
 }
+
+.mobile-arrow { display: none; }
+.pc-text { display: inline; }
 
 .input-area {
   padding: 12px 16px;
@@ -1771,9 +1774,12 @@ const displayItems = computed<DisplayItem[]>(() => {
 
   .back-to-bottom {
     bottom: 65px;
-    padding: 8px 18px;
-    font-size: 13px;
+    right: 12px;
+    padding: 6px 10px;
+    font-size: 14px;
   }
+  .mobile-arrow { display: inline; }
+  .pc-text { display: none; }
 
   .input-area {
     padding: 10px;

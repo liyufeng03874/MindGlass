@@ -965,6 +965,8 @@ class ReactLoop:
     async def _answer_phase(self, observe_outputs: list[dict], plan_decision: dict) -> AsyncGenerator[str, None]:
         """run/retry 共用出口：Plan 触发安全拦截时直接出安全 Answer，否则流式生成回答。
         避免 retry 路径漏掉 safety_interrupt 分支导致行为与 run 不一致。"""
+        if not plan_decision:
+            plan_decision = {"decision": "sufficient", "reasoning": "决策结果缺失，基于已有信息生成回答"}
         if plan_decision.get("safety_interrupt"):
             safety_text = "很抱歉，该问题涉及不合规内容，无法提供回答。"
             ans_node = self._create_answer_node(
@@ -1180,6 +1182,8 @@ class ReactLoop:
             self.store.meta.plan_count = plan_count
 
         # ── 终止 → Answer（流式，含安全分支）──
+        if not plan_result:
+            print(f"[WARN] plan_result is None before _answer_phase, nodes={[n.type for n in self.store.nodes]}")
         async for event in self._answer_phase(observe_outputs, plan_result):
             yield event
 
