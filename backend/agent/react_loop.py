@@ -1094,7 +1094,7 @@ class ReactLoop:
 
     # ── 主循环 ──
 
-    async def run(self, query: str, history: list = None) -> AsyncGenerator[str, None]:
+    async def run(self, query: str, history: list = None, conversation_id: str = "") -> AsyncGenerator[str, None]:
         """
         执行决策循环（v2）：
         Plan(1) → [ToolCall → Observe → Plan(N)]* → Answer
@@ -1107,6 +1107,8 @@ class ReactLoop:
         self.store.reset()
         self.store.meta.run_id = self.run_id
         self.store.meta.query = query
+        # 会话 ID：前端传入则沿用（多轮对话），否则新建一个（首轮）
+        self.store.meta.conversation_id = conversation_id or f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.store.meta.run_started_at = time.time()
 
         plan_count = 0

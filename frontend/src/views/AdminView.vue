@@ -54,28 +54,75 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="run in runs" :key="run.run_id">
-            <td class="id-cell"><code>{{ run.run_id }}</code></td>
-            <td class="query-cell">{{ run.query }}</td>
-            <td class="answer-cell" :title="run.final_answer || '无'">
-              {{ truncate(run.final_answer || '无', 40) }}
-            </td>
-            <td>{{ run.total_nodes }}</td>
-            <td>{{ run.plan_count }}</td>
-            <td>{{ run.toolcall_count }}</td>
-            <td>{{ run.observe_count }}</td>
-            <td>{{ run.answer_count }}</td>
-            <td>{{ formatDurationMs(run.total_duration_ms) }}</td>
-            <td>
-              <span v-if="run.degraded" class="badge degraded">⚠️ 降级</span>
-              <span v-else class="badge ok">✓</span>
-            </td>
-            <td>{{ run.tool_error_count }}</td>
-            <td class="time-cell">{{ formatTime(run.created_at) }}</td>
-            <td>
-              <button class="replay-btn" @click="openReplay(run.run_id)">🔍 思维重现</button>
-            </td>
-          </tr>
+          <template v-for="group in conversationGroups" :key="group.convId">
+            <!-- 多轮会话：父行（首轮 query + 轮数，可展开） -->
+            <template v-if="group.runs.length > 1">
+              <tr class="conv-parent" @click="toggleConv(group.convId)">
+                <td class="id-cell"><span class="expand-arrow">{{ expandedConvs[group.convId] ? '▼' : '▶' }}</span> <code>{{ group.runs.length }} 轮</code></td>
+                <td class="query-cell">💬 {{ group.runs[0].query }}</td>
+                <td class="answer-cell" :title="group.runs[group.runs.length - 1].final_answer || '无'">
+                  {{ truncate(group.runs[group.runs.length - 1].final_answer || '无', 40) }}
+                </td>
+                <td colspan="5" class="conv-stats">
+                  共 {{ group.runs.reduce((s, r) => s + r.total_nodes, 0) }} 节点
+                </td>
+                <td>{{ formatDurationMs(group.runs.reduce((s, r) => s + r.total_duration_ms, 0)) }}</td>
+                <td>
+                  <span v-if="group.runs.some(r => r.degraded)" class="badge degraded">⚠️</span>
+                  <span v-else class="badge ok">✓</span>
+                </td>
+                <td>{{ group.runs.reduce((s, r) => s + r.tool_error_count, 0) }}</td>
+                <td class="time-cell">{{ formatTime(group.runs[0].created_at) }}</td>
+                <td></td>
+              </tr>
+              <!-- 子行：各轮 run -->
+              <tr v-if="expandedConvs[group.convId]" v-for="(run, i) in group.runs" :key="run.run_id" class="conv-child">
+                <td class="id-cell"><span class="turn-badge">第{{ i + 1 }}轮</span></td>
+                <td class="query-cell">{{ run.query }}</td>
+                <td class="answer-cell" :title="run.final_answer || '无'">
+                  {{ truncate(run.final_answer || '无', 40) }}
+                </td>
+                <td>{{ run.total_nodes }}</td>
+                <td>{{ run.plan_count }}</td>
+                <td>{{ run.toolcall_count }}</td>
+                <td>{{ run.observe_count }}</td>
+                <td>{{ run.answer_count }}</td>
+                <td>{{ formatDurationMs(run.total_duration_ms) }}</td>
+                <td>
+                  <span v-if="run.degraded" class="badge degraded">⚠️ 降级</span>
+                  <span v-else class="badge ok">✓</span>
+                </td>
+                <td>{{ run.tool_error_count }}</td>
+                <td class="time-cell">{{ formatTime(run.created_at) }}</td>
+                <td>
+                  <button class="replay-btn" @click="openReplay(run.run_id)">🔍 思维重现</button>
+                </td>
+              </tr>
+            </template>
+            <!-- 单轮会话：普通行 -->
+            <tr v-else>
+              <td class="id-cell"><code>{{ group.runs[0].run_id }}</code></td>
+              <td class="query-cell">{{ group.runs[0].query }}</td>
+              <td class="answer-cell" :title="group.runs[0].final_answer || '无'">
+                {{ truncate(group.runs[0].final_answer || '无', 40) }}
+              </td>
+              <td>{{ group.runs[0].total_nodes }}</td>
+              <td>{{ group.runs[0].plan_count }}</td>
+              <td>{{ group.runs[0].toolcall_count }}</td>
+              <td>{{ group.runs[0].observe_count }}</td>
+              <td>{{ group.runs[0].answer_count }}</td>
+              <td>{{ formatDurationMs(group.runs[0].total_duration_ms) }}</td>
+              <td>
+                <span v-if="group.runs[0].degraded" class="badge degraded">⚠️ 降级</span>
+                <span v-else class="badge ok">✓</span>
+              </td>
+              <td>{{ group.runs[0].tool_error_count }}</td>
+              <td class="time-cell">{{ formatTime(group.runs[0].created_at) }}</td>
+              <td>
+                <button class="replay-btn" @click="openReplay(group.runs[0].run_id)">🔍 思维重现</button>
+              </td>
+            </tr>
+          </template>
           <tr v-if="runs.length === 0">
             <td colspan="13" class="empty-row">暂无数据</td>
           </tr>
@@ -114,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import ReasoningGraph from '../components/ReasoningGraph.vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -143,11 +190,42 @@ interface RunRow {
   degraded: boolean
   tool_error_count: number
   created_at: string
+  conversation_id?: string
 }
 const runs = ref<RunRow[]>([])
 const total = ref(0)
 const limit = ref(20)
 const offset = ref(0)
+
+// ── 会话分组：同 conversation_id 的 run 归为一组 ──
+interface ConvGroup {
+  convId: string
+  runs: RunRow[]  // 组内按轮次升序（时间早→晚）
+}
+
+const conversationGroups = computed<ConvGroup[]>(() => {
+  const groups = new Map<string, RunRow[]>()
+  const order: string[] = []
+  for (const r of runs.value) {
+    const cid = r.conversation_id || r.run_id
+    if (!groups.has(cid)) {
+      groups.set(cid, [])
+      order.push(cid)
+    }
+    groups.get(cid)!.push(r)
+  }
+  return order.map(cid => ({
+    convId: cid,
+    // runs 列表是时间倒序，组内反转为轮次正序
+    runs: [...groups.get(cid)!].reverse(),
+  }))
+})
+
+const expandedConvs = ref<Record<string, boolean>>({})
+
+function toggleConv(convId: string) {
+  expandedConvs.value[convId] = !expandedConvs.value[convId]
+}
 
 // ── 思维重现 ──
 const showReplay = ref(false)
@@ -340,6 +418,38 @@ onMounted(() => {
 
 .run-table tr:hover td {
   background: #f9f9f9;
+}
+
+/* 会话分组：父行/子行 */
+.run-table tr.conv-parent {
+  cursor: pointer;
+  background: #faf7ff;
+}
+.run-table tr.conv-parent:hover td {
+  background: #f3edff;
+}
+.expand-arrow {
+  font-size: 10px;
+  color: #8b6ff0;
+}
+.conv-stats {
+  color: #888;
+  font-size: 12px;
+}
+.run-table tr.conv-child td {
+  background: #fcfcfe;
+}
+.run-table tr.conv-child:hover td {
+  background: #f5f3fb;
+}
+.turn-badge {
+  display: inline-block;
+  background: #efe9ff;
+  color: #8b6ff0;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+  white-space: nowrap;
 }
 
 .id-cell code {

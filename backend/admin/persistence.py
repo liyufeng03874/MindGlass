@@ -49,16 +49,21 @@ CREATE TABLE IF NOT EXISTS runs (
     total_duration_ms   INTEGER NOT NULL DEFAULT 0,
     degraded        INTEGER NOT NULL DEFAULT 0,
     tool_error_count    INTEGER NOT NULL DEFAULT 0,
-    snapshot        TEXT
+    snapshot        TEXT,
+    conversation_id TEXT
 )
 """
 
 
 def init_db():
-    """初始化 runs 表"""
+    """初始化 runs 表（含存量库的列补齐）"""
     conn = _get_conn()
     try:
         conn.execute(DDL_RUNS)
+        # 存量库补列（幂等）
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(runs)")]
+        if "conversation_id" not in cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN conversation_id TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -132,6 +137,7 @@ def save_run(snapshot: dict) -> str:
     meta = snapshot.get("meta", {})
     run_id = meta.get("run_id", "")
     query = meta.get("query", "")
+    conversation_id = meta.get("conversation_id", "")
     created_at = datetime.utcnow().isoformat()
 
     snapshot_json = json.dumps(snapshot, ensure_ascii=False)
@@ -142,14 +148,14 @@ def save_run(snapshot: dict) -> str:
             """INSERT OR REPLACE INTO runs (
                 run_id, query, created_at, final_answer,
                 total_nodes, plan_count, toolcall_count, observe_count, answer_count,
-                total_duration_ms, degraded, tool_error_count, snapshot
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                total_duration_ms, degraded, tool_error_count, snapshot, conversation_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id, query, created_at, stats["final_answer"],
                 stats["total_nodes"], stats["plan_count"], stats["toolcall_count"],
                 stats["observe_count"], stats["answer_count"],
                 stats["total_duration_ms"], stats["degraded"],
-                stats["tool_error_count"], snapshot_json,
+                stats["tool_error_count"], snapshot_json, conversation_id,
             ),
         )
         conn.commit()
@@ -252,7 +258,8 @@ def get_runs(limit: int = 20, offset: int = 0) -> dict:
             """
             SELECT run_id, query, final_answer, total_nodes,
                    plan_count, toolcall_count, observe_count, answer_count,
-                   total_duration_ms, degraded, tool_error_count, created_at
+                   total_duration_ms, degraded, tool_error_count, created_at,
+                   conversation_id
             FROM runs
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -275,6 +282,7 @@ def get_runs(limit: int = 20, offset: int = 0) -> dict:
                 "degraded": bool(r["degraded"]),
                 "tool_error_count": r["tool_error_count"],
                 "created_at": r["created_at"],
+                "conversation_id": r["conversation_id"] or r["run_id"],
             })
 
         return {"runs": runs, "total": total}

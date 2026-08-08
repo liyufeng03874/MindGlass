@@ -70,10 +70,11 @@ async def run_agent(request: dict):
     """
     启动 ReAct 推理（SSE 流式推送）
     返回 SSE stream，逐步推送节点和状态
-    body: {"query": "...", "history": [{"role":"user","content":"..."}]}
+    body: {"query": "...", "history": [...], "conversation_id": "conv_xxx"(可选，多轮对话复用)}
     """
     query = request.get("query", "")
     history_msgs = request.get("history", [])
+    conversation_id = request.get("conversation_id", "")
     
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
@@ -85,7 +86,7 @@ async def run_agent(request: dict):
         global _active_loop
         _active_loop = loop
         try:
-            async for event in loop.run(query, history_msgs):
+            async for event in loop.run(query, history_msgs, conversation_id):
                 yield event
         finally:
             _active_loop = None

@@ -38,6 +38,9 @@ export function useAgentGraph() {
   const rounds = ref<Round[]>([])
   let roundCounter = 0
 
+  /** 会话 ID：同一次页面会话内的多轮 run 共享，清空页面时重置（新会话） */
+  let conversationId: string | null = null
+
   /** 当前轮（最近一轮，SSE 事件都写进它） */
   function currentBlocks(): LeftBlock[] {
     if (rounds.value.length === 0) {
@@ -53,9 +56,10 @@ export function useAgentGraph() {
     return rounds.value[rounds.value.length - 1]
   }
 
-  /** 清空所有轮次（页面清空用） */
+  /** 清空所有轮次（页面清空用），同时开启新会话 */
   function clearRounds() {
     rounds.value = []
+    conversationId = null
   }
 
   /** 截断点节点（打断后只有它能点重试；重试或新查询后清空） */
@@ -79,6 +83,11 @@ export function useAgentGraph() {
     // 新轮入队，后续 SSE 事件全部写进这一轮
     roundCounter++
     rounds.value.push({ id: `round_${roundCounter}`, query, blocks: [] })
+
+    // 首轮生成会话 ID，后续轮复用（多轮对话关联）
+    if (!conversationId) {
+      conversationId = `conv_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`
+    }
 
     status.value = '🤔 连接中...'
     connected.value = true
@@ -112,7 +121,7 @@ export function useAgentGraph() {
     fetch(`${API_BASE}/api/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, history }),
+      body: JSON.stringify({ query, history, conversation_id: conversationId }),
     }).then(async response => {
       if (!response.ok || !response.body) {
         console.error('Run failed:', response.status)
