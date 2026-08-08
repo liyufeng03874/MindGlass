@@ -9,8 +9,11 @@ MindGlass 是一个基于 ReAct 范式（Reason + Act）的多步推理 Agent �
 ### 核心亮点
 
 - **思维透明**：推理过程不再是黑盒，每一步（规划→执行→观察→回答）都实时可视化
-- **可干预**：点击任意节点可编辑参数、更换工具、重试，支持分支保留与对比
+- **可干预**：点击任意节点可编辑参数、更换工具、重试，支持分支保留与对比；运行中可任意节点打断
 - **并行推理**：支持多工具并行执行（如同时搜索+RAG检索），显著提升响应速度
+- **多轮对话**：支持历史对话上下文，多轮连续提问；会话自动关联（conversation_id）
+- **双端适配**：PC 左右分栏 / 移动端上下分栏 + 底部 tab（Tailwind CSS 响应式）
+- **安全防线**：BERT 内容安全模型四层拦截（prompt 层 + Plan 校验 + Answer 流式校验 + 前端拦截）
 - **前端主导**：Vue 3 + TypeScript + @vue-flow，完整的图可视化与交互体验
 
 ## 技术栈
@@ -20,43 +23,47 @@ MindGlass 是一个基于 ReAct 范式（Reason + Act）的多步推理 Agent �
 |------|------|
 | Vue 3 + TypeScript | UI 框架 |
 | @vue-flow/core | 思维图渲染引擎 |
+| Tailwind CSS | 双端响应式适配（移动端上下分栏 + 底部 tab） |
 | markdown-it | Agent 回答 Markdown 渲染 |
-| SSE (EventSource) | 实时流式接收推理事件 |
+| fetch + ReadableStream | SSE 流式接收（POST 请求体携带 history，避开 URL 长度限制） |
 
 ### 后端
 | 技术 | 用途 |
 |------|------|
 | FastAPI | API 框架 |
-| OpenAI 兼容 API (qwen3.6-plus) | LLM 规划/回答生成 |
+| OpenAI 兼容 API (deepseek-v4-flash) | LLM 规划/回答生成（2026-08 从 qwen3.6-plus 切换，TTFT 快 2-4 倍） |
 | Tavily Search API | 网络搜索工具 |
-| other-world RAG | 本地知识库检索（复用） |
+| other-world RAG | 法律知识检索（仅法律案情类问题触发，docker 服务名互访） |
+| BERT 安全模型 (ONNX Runtime) | 内容安全四层拦截 |
 
 ## 架构设计
 
-### ReAct 循环
+### 决策回环（v2）
 
 ```
-User Query
+User Query（+ 历史对话）
     ↓
-  [Plan] ── LLM 拆解为步骤列表
+  [Plan] ── 决策中枢：sufficient（直答）/ need_more（补搜）/ terminate（降级）
+    ↓ need_more
+[ToolCall] ── 并行执行 search / rag_retrieve（rag 仅限法律案情类）
     ↓
-[ToolCall] ── 执行 search / rag_retrieve
+ [Observe] ── 只做观察：整合/去重/摘要/矛盾检测/增量对比，不参与决策
     ↓
- [Observe] ── 收集工具返回结果
+  [Plan] ── 回到决策，直到 sufficient 或 5 轮硬上限
     ↓
- [Answer] ── LLM 基于所有观察结果生成回答
+ [Answer] ── 流式生成最终回答（每 100 字过一次 BERT 安全校验）
     ↓
 User Response
 ```
 
+> 人工在环：运行中可在任意节点打断（截断点后置灰保留，可重试）；编辑节点参数重新执行；废弃分支置灰不删除（"边只标记不删除"）。
+
 ### 数据流
 
 ```
-后端 ReActLoop ──SSE──→ 前端 useAgentGraph ──→ 状态管理
+后端 ReactLoop ──SSE──→ 前端 useAgentGraph ──→ rounds 数组（每轮 = query + blocks + answer）
                                                    ↓
-                                          ReasoningGraph.vue（@vue-flow 渲染）
-                                                   ↓
-                                          ChatPanel.vue（对话 + 最终回答）
+                              ReasoningGraph.vue（右侧思维图）+ ChatPanel.vue（左侧按轮渲染）
 ```
 
 ### 节点类型
@@ -96,13 +103,13 @@ npm install
 ```bash
 # 终端 1：后端
 cd backend
-python server.py
-# 访问 http://localhost:8002/api/health 确认
+uvicorn server:app --host 0.0.0.0 --port 8001
+# 访问 http://localhost:8001/api/health 确认
 
 # 终端 2：前端
 cd frontend
 npm run dev
-# 访问 http://localhost:5173
+# 访问 http://localhost:5173（vite 代理 /api → localhost:8001）
 ```
 
 ### 环境变量
@@ -111,10 +118,11 @@ npm run dev
 |------|------|------|
 | `API_KEY` | LLM API Key | `sk-xxxxx` |
 | `OPENAI_BASE_URL` | OpenAI 兼容 API 地址 | `https://api.xxx.com/v1` |
-| `MODEL` | 模型名称 | `qwen3.6-plus` |
+| `MODEL` | 模型名称 | `deepseek-v4-flash` |
 | `TAVILY_API_KEY` | Tavily 搜索 API Key | `tvly-xxxxx` |
-| `RAG_API_URL` | RAG 服务地址 | `http://localhost:8001` |
-| `MINDGLASS_PORT` | 后端端口 | `8002` |
+| `RAG_API_URL` | RAG 服务地址 | `http://localhost:5000`（本地）/ `http://otherworld-backend:8000`（Docker） |
+| `BERT_SAFETY_MODEL` | BERT 安全模型路径 | `/app/models/bert-safety` |
+| `MINDGLASS_PORT` | 后端端口 | `8001` |
 
 ## API 接口
 
@@ -123,9 +131,14 @@ npm run dev
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/tools` | 列出可用工具 |
 | GET | `/api/graph` | 获取当前推理图状态 |
-| GET | `/api/run?query=xxx` | SSE 流式推理 |
+| POST | `/api/run` | SSE 流式推理，body: {query, history, conversation_id} |
 | POST | `/api/retry` | 从指定 step 重试（SSE） |
+| POST | `/api/retry_from_graph` | 并行重试方案 C（SSE） |
+| POST | `/api/interrupt` | 运行中打断（截断点后置灰保留） |
 | POST | `/api/load-demo` | 加载测试数据（开发用） |
+| GET | `/api/admin/runs` | admin 运行记录（含 conversation_id 会话分组） |
+| GET | `/api/admin/runs/{run_id}` | 单条运行快照（思维重现） |
+| GET | `/api/admin/overview` | 总览指标（完答率/降级率/平均耗时） |
 
 ## Demo Query
 
@@ -157,16 +170,20 @@ MindGlass/
 │       └── BUG-17-DISCUSS.md  # 并行重试方案 C 讨论
 ├── frontend/
 │   ├── src/
-│   │   ├── App.vue            # 主应用（左右分栏布局）
+│   │   ├── App.vue            # 主应用（PC 左右分栏 / 移动端上下分栏）
 │   │   ├── components/
-│   │   │   ├── ChatPanel.vue      # 对话面板
-│   │   │   ├── ReasoningGraph.vue # 思维图 + 节点编辑
+│   │   │   ├── ChatPanel.vue      # 对话面板（按轮次渲染）
+│   │   │   ├── ThoughtBlockList.vue # 思考直播 block 渲染（人读视图）
+│   │   │   ├── ReasoningGraph.vue # 思维图 + 节点编辑 + 打断
 │   │   │   └── NodeDetail.vue     # 节点详情面板
+│   │   ├── views/
+│   │   │   ├── HomeView.vue       # 首页（对话 + 思维图）
+│   │   │   └── AdminView.vue      # 后台（运行记录树状表格 + 思维重现）
 │   │   ├── composables/
-│   │   │   ├── useAgentGraph.ts   # SSE + 状态管理 + 重试
+│   │   │   ├── useAgentGraph.ts   # SSE + rounds 状态管理 + 重试/打断
 │   │   │   └── useReasoningGraph.ts # 图渲染逻辑
 │   │   └── types/
-│   │       └── agent.ts       # TypeScript 类型定义
+│   │       └── agent.ts       # TypeScript 类型定义（含 Round）
 │   └── ...
 └── README.md
 ```
@@ -185,9 +202,11 @@ MindGlass/
 
 - ✅ Phase 0：项目骨架
 - ✅ Phase 1：第一个可用推理流程
-- ✅ Phase 2：节点交互与干预（基础完成，Bug 17 待修）
-- ✅ Phase 3：工具扩展与打磨（基础完成，Bug 16 待修）
-- ⏳ Phase 4：面试级打磨（进行中）
+- ✅ Phase 2：节点交互与干预
+- ✅ Phase 3：工具扩展与打磨
+- ✅ Phase 4：决策回环 v2 重构 + 打断/重试大修（边只标记不删除）
+- ✅ Phase 5：BERT 安全防线 + 移动端适配 + 多轮对话 + 会话关联（2026-08）
+- ✅ 已上线：mindglass.stelladream.cn（Docker Compose + Nginx）
 
 ## License
 
