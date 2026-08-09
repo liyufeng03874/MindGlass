@@ -12,6 +12,7 @@ MindGlass 是一个基于 ReAct 范式（Reason + Act）的多步推理 Agent �
 - **可干预**：点击任意节点可编辑参数、更换工具、重试，支持分支保留与对比；运行中可任意节点打断
 - **并行推理**：支持多工具并行执行（如同时搜索+RAG检索），显著提升响应速度
 - **多轮对话**：支持历史对话上下文，多轮连续提问；会话自动关联（conversation_id）
+- **Redis 热缓存**：思维图增量缓存（RPUSH）+ 断联恢复（后端重启后前端自动重建图）+ 高频 query 语义复用（embedding 相似检索）
 - **双端适配**：PC 左右分栏 / 移动端上下分栏 + 底部 tab（Tailwind CSS 响应式）
 - **安全防线**：BERT 内容安全模型四层拦截（prompt 层 + Plan 校验 + Answer 流式校验 + 前端拦截）
 - **前端主导**：Vue 3 + TypeScript + @vue-flow，完整的图可视化与交互体验
@@ -31,6 +32,7 @@ MindGlass 是一个基于 ReAct 范式（Reason + Act）的多步推理 Agent �
 | 技术 | 用途 |
 |------|------|
 | FastAPI | API 框架 |
+| Redis 5.x (redis-py, RESP2) | 思维图热缓存 / 断联恢复 / query 复用索引 |
 | OpenAI 兼容 API (deepseek-v4-flash) | LLM 规划/回答生成（2026-08 从 qwen3.6-plus 切换，TTFT 快 2-4 倍） |
 | Tavily Search API | 网络搜索工具 |
 | other-world RAG | 法律知识检索（仅法律案情类问题触发，docker 服务名互访） |
@@ -57,6 +59,30 @@ User Response
 ```
 
 > 人工在环：运行中可在任意节点打断（截断点后置灰保留，可重试）；编辑节点参数重新执行；废弃分支置灰不删除（"边只标记不删除"）。
+
+### Redis 热缓存层（2026-08-10）
+
+**设计定稿（哥哥 08-10 凌晨推演）**：同一套 Redis 存 graph 本身（node+edge+branch），不搞事件流转换；位置不存，前端固定算法重排。
+
+```
+正常推进（高频快路径）  add_node/add_edge/create_branch → RPUSH 增量追加
+编辑/重放（低频慢路径）  后端算完整新图 → DEL+RPUSH 整体覆盖
+run 收尾               后台线程登记 query 向量 → mg:query:index（复用候选）
+断联恢复               GET /api/graph 内存空 → 从 Redis 重建 → 前端渲染
+语义复用               发消息前 POST /api/reuse/check → 命中旧图直接渲染不重跑
+```
+
+| Redis Key | 类型 | 内容 |
+|-----------|------|------|
+| `mg:graph:{run_id}:items` | LIST | 图组件 JSON（node/edge/branch 增量） |
+| `mg:graph:{run_id}:meta` | STRING | meta JSON |
+| `mg:graph:current` | STRING | 最近 run_id（恢复入口） |
+| `mg:query:index` | HASH | field=run_id，value={query, 1024维向量} |
+
+- TTL 24h（热缓存）；SQLite 仍是冷存储/权威层（run 结束落盘）
+- **降级原则**：Redis/embedding 服务挂了绝不影响主流程，全部静默降级
+- 语义复用阈值默认 0.92（`MINDGLASS_REUSE_THRESHOLD`，待真实 query 校准）
+- 实现细节/验收记录：`memory/projects/mindglass/Redis缓存开发记录-20260810.md`
 
 ### 数据流
 
@@ -123,6 +149,8 @@ npm run dev
 | `RAG_API_URL` | RAG 服务地址 | `http://localhost:5000`（本地）/ `http://otherworld-backend:8000`（Docker） |
 | `BERT_SAFETY_MODEL` | BERT 安全模型路径 | `/app/models/bert-safety` |
 | `MINDGLASS_PORT` | 后端端口 | `8001` |
+| `MINDGLASS_REDIS_HOST/PORT/DB` | Redis 地址 | `127.0.0.1` / `6379` / `0` |
+| `MINDGLASS_REUSE_THRESHOLD` | 语义复用相似度阈值 | `0.92` |
 
 ## API 接口
 
@@ -130,7 +158,8 @@ npm run dev
 |------|------|------|
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/tools` | 列出可用工具 |
-| GET | `/api/graph` | 获取当前推理图状态 |
+| GET | `/api/graph` | 获取当前推理图（内存空时自动从 Redis 恢复） |
+| POST | `/api/reuse/check` | 高频 query 复用语义检索，body: {query}；命中返回缓存图 |
 | POST | `/api/run` | SSE 流式推理，body: {query, history, conversation_id} |
 | POST | `/api/retry` | 从指定 step 重试（SSE） |
 | POST | `/api/retry_from_graph` | 并行重试方案 C（SSE） |
@@ -164,7 +193,8 @@ MindGlass/
 │   │   └── llm.py             # LLM 调用封装
 │   ├── state/
 │   │   ├── models.py          # 数据模型（Node/Edge/Branch）
-│   │   └── store.py           # 图状态管理
+│   │   ├── store.py           # 图状态管理（变更监听器 + 快照恢复）
+│   │   └── redis_cache.py     # Redis 热缓存层（增量/覆盖/恢复/语义复用）
 │   └── docs/
 │       ├── BUGS.md            # Bug 记录与架构决策
 │       └── BUG-17-DISCUSS.md  # 并行重试方案 C 讨论
@@ -206,6 +236,7 @@ MindGlass/
 - ✅ Phase 3：工具扩展与打磨
 - ✅ Phase 4：决策回环 v2 重构 + 打断/重试大修（边只标记不删除）
 - ✅ Phase 5：BERT 安全防线 + 移动端适配 + 多轮对话 + 会话关联（2026-08）
+- ✅ Phase 6：Redis 热缓存层——断联恢复 + 高频 query 语义复用（2026-08-10，本地验收通过）
 - ✅ 已上线：mindglass.stelladream.cn（Docker Compose + Nginx）
 
 ## License
