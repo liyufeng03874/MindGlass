@@ -19,7 +19,9 @@ Key 设计：
 """
 
 import json
+import math
 import os
+import urllib.request
 
 try:
     import redis as _redis
@@ -30,6 +32,13 @@ REDIS_HOST = os.getenv("MINDGLASS_REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.getenv("MINDGLASS_REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("MINDGLASS_REDIS_DB", "0"))
 TTL_SECONDS = int(os.getenv("MINDGLASS_REDIS_TTL", str(24 * 3600)))
+
+# 复用 other-world 的向量化接口（本地 bge-large-zh-v1.5，1024 维，L2 已归一化）
+RAG_API_URL = os.getenv("RAG_API_URL", "http://localhost:5000")
+# 语义相似判定阈值：高于它才复用旧图（L2 归一化向量点积 = 余弦相似度）
+REUSE_THRESHOLD = float(os.getenv("MINDGLASS_REUSE_THRESHOLD", "0.92"))
+# query 向量索引 key（HASH：field=run_id，value=JSON{query, vector}）
+QUERY_INDEX_KEY = "mg:query:index"
 
 _client = None
 
@@ -95,6 +104,7 @@ def overwrite(run_id: str, snapshot: dict) -> bool:
 
     snapshot: _store.to_dict() 的完整图 {nodes, edges, branches, meta}
     用 pipeline 的 DEL+RPUSH 全量实现"整体覆盖"，语义等价于 SET。
+    覆盖成功后后台线程登记 query 向量进复用索引（不阻塞 SSE 流收尾）。
     """
     c = _get_client()
     if c is None or not run_id:
@@ -118,10 +128,23 @@ def overwrite(run_id: str, snapshot: dict) -> bool:
         pipe.expire(_items_key(run_id), TTL_SECONDS)
         pipe.expire(_meta_key(run_id), TTL_SECONDS)
         pipe.execute()
+        # 后台登记 query 向量（embed 可能慢，不能堵住流收尾）
+        q = snapshot.get("meta", {}).get("query", "")
+        if q:
+            import threading
+            threading.Thread(
+                target=_index_query_bg, args=(run_id, q), daemon=True
+            ).start()
         return True
     except Exception as e:
         print(f"[redis-cache] overwrite 失败（不影响主流程）: {e}")
         return False
+
+
+def _index_query_bg(run_id: str, query: str):
+    vec = embed_query(query)
+    if vec:
+        index_query(run_id, query, vec)
 
 
 def load(run_id: str = "") -> dict:
@@ -171,3 +194,93 @@ def health() -> dict:
         return {"redis": "ok", "host": REDIS_HOST, "port": REDIS_PORT}
     except Exception:
         return {"redis": "down"}
+
+
+# ─────────────────── 高频 query 思维图复用 ───────────────────
+
+def embed_query(text: str):
+    """调 other-world /api/embed 拿 1024 维向量；服务不在线返回 None（静默降级）"""
+    if not text:
+        return None
+    try:
+        body = json.dumps({"texts": [text]}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{RAG_API_URL}/api/embed",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        vecs = result.get("embeddings", [])
+        return vecs[0] if vecs else None
+    except Exception as e:
+        print(f"[redis-cache] embed 失败（降级为不复用）: {e}")
+        return None
+
+
+def index_query(run_id: str, query: str, vector: list) -> bool:
+    """run 结束时登记 query 向量进索引（复用候选）"""
+    c = _get_client()
+    if c is None or not run_id or not query or not vector:
+        return False
+    try:
+        payload = json.dumps({"query": query, "vector": vector}, ensure_ascii=False)
+        c.hset(QUERY_INDEX_KEY, run_id, payload)
+        c.expire(QUERY_INDEX_KEY, TTL_SECONDS)
+        return True
+    except Exception as e:
+        print(f"[redis-cache] query 索引写入失败: {e}")
+        return False
+
+
+def find_reusable(query: str, threshold: float = None) -> dict:
+    """语义相似检索：找可复用的已缓存思维图。
+
+    返回：
+      命中：{"hit": True, "similarity", "run_id", "cached_query", "graph"}
+      未命中：{"hit": False, "best_similarity", "reason"}
+    向量化服务不在线或索引为空均返回未命中，绝不阻断主流程。
+    """
+    threshold = REUSE_THRESHOLD if threshold is None else threshold
+    c = _get_client()
+    if c is None:
+        return {"hit": False, "best_similarity": 0.0, "reason": "redis_down"}
+    vec = embed_query(query)
+    if vec is None:
+        return {"hit": False, "best_similarity": 0.0, "reason": "embed_unavailable"}
+    try:
+        entries = c.hgetall(QUERY_INDEX_KEY)  # {run_id: json}
+        if not entries:
+            return {"hit": False, "best_similarity": 0.0, "reason": "index_empty"}
+        best_sim, best_run = 0.0, ""
+        best_payload = None
+        for run_id, raw in entries.items():
+            try:
+                item = json.loads(raw)
+            except Exception:
+                continue
+            cached_vec = item.get("vector", [])
+            if len(cached_vec) != len(vec):
+                continue
+            # 两边都 L2 归一化 → 点积即余弦相似度
+            sim = sum(a * b for a, b in zip(vec, cached_vec))
+            if sim > best_sim:
+                best_sim, best_run, best_payload = sim, run_id, item
+        if best_sim >= threshold and best_payload is not None:
+            graph = load(best_run)
+            if graph.get("nodes"):
+                return {
+                    "hit": True,
+                    "similarity": round(best_sim, 4),
+                    "run_id": best_run,
+                    "cached_query": best_payload.get("query", ""),
+                    "graph": graph,
+                }
+            return {"hit": False, "best_similarity": round(best_sim, 4),
+                    "reason": "graph_expired"}
+        return {"hit": False, "best_similarity": round(best_sim, 4),
+                "reason": "below_threshold"}
+    except Exception as e:
+        print(f"[redis-cache] 复用检索失败: {e}")
+        return {"hit": False, "best_similarity": 0.0, "reason": "error"}

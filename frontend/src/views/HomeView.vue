@@ -98,12 +98,14 @@ function checkMobile() {
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  // 断连恢复：页面加载时探测后端（后端内存空时会从 Redis 重建图）
+  tryRestoreFromCache()
 })
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
 })
 
-const { graph, status, connected, rounds, clearRounds, isRunning, cutNode, sendMessage, interrupt, clearCut, retryFrom } = useAgentGraph()
+const { graph, status, connected, rounds, clearRounds, isRunning, cutNode, sendMessage, interrupt, clearCut, retryFrom, tryRestoreFromCache } = useAgentGraph()
 
 // ── 全局相位：从推理状态推导，驱动整站氛围层呼吸（水镜 v2.1 第一遍）──
 const { phase } = usePhase()

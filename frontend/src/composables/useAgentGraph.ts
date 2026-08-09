@@ -70,7 +70,73 @@ export function useAgentGraph() {
   /** 重试分支标记：重试开始后的新 block 标记 phase=retry（左侧样式区分） */
   let inRetryBranch = false
 
-  function sendMessage(query: string) {
+  /** 从完整图快照提取最终回答（恢复/复用共用） */
+  function finalAnswerOf(nodes: AgentNode[]): string {
+    const ans = [...nodes].reverse().find(n => n.type === 'Answer' && n.status === 'done')
+    return (ans?.data?.output as string) || ''
+  }
+
+  /** 断连恢复：页面加载时探测 /api/graph（后端内存空时会从 Redis 重建）。
+   *  有图就渲染 + 左侧补一轮对话记录；无图/后端不在线静默返回 false。 */
+  async function tryRestoreFromCache(): Promise<boolean> {
+    try {
+      const resp = await fetch(`${API_BASE}/api/graph`)
+      if (!resp.ok) return false
+      const snapshot = await resp.json()
+      if (!snapshot?.nodes || snapshot.nodes.length === 0) return false
+      graph.value = snapshot as ReasoningGraph
+      roundCounter++
+      rounds.value.push({
+        id: `round_restore_${roundCounter}`,
+        query: snapshot.meta?.query || '（缓存恢复）',
+        blocks: [],
+        answer: finalAnswerOf(snapshot.nodes),
+      })
+      connected.value = true
+      status.value = '📡 已从缓存恢复上一次的思维图'
+      return true
+    } catch (e) {
+      return false
+    }
+  }
+
+  /** 高频 query 复用检查：语义相似命中时直接渲染旧图，不发起新 run。
+   *  任何异常（后端没起/向量化服务不在线）都返回 null → 照常新 run。 */
+  async function checkReuse(query: string) {
+    try {
+      const resp = await fetch(`${API_BASE}/api/reuse/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      })
+      if (!resp.ok) return null
+      const r = await resp.json()
+      return r?.hit ? r : null
+    } catch (e) {
+      return null
+    }
+  }
+
+  async function sendMessage(query: string) {
+    // ── 复用检查：语义相似的已缓存思维图直接渲染，不重跑 ──
+    const reuse = await checkReuse(query)
+    if (reuse && reuse.graph?.nodes?.length) {
+      roundCounter++
+      rounds.value.push({
+        id: `round_reuse_${roundCounter}`,
+        query,
+        blocks: [],
+        answer: finalAnswerOf(reuse.graph.nodes),
+      })
+      graph.value = reuse.graph as ReasoningGraph
+      if (!conversationId) {
+        conversationId = `conv_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`
+      }
+      connected.value = true
+      status.value = `♻️ 命中相似问题缓存（相似度 ${reuse.similarity}），复用已有思维图`
+      return
+    }
+
     // 提取历史对话（最近 3 轮，每条截 200 字）——在新轮入队前取
     const history = rounds.value.flatMap(r => {
       const pair: Array<{ role: string, content: string }> = [
@@ -737,5 +803,6 @@ export function useAgentGraph() {
     clearCut,
     retryFrom,
     retryFromGraph,
+    tryRestoreFromCache,
   }
 }

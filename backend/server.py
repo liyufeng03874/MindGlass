@@ -84,6 +84,20 @@ def get_graph():
     return _store.to_dict()
 
 
+@app.post("/api/reuse/check")
+def reuse_check(request: dict):
+    """高频 query 思维图复用检查。
+
+    body: {"query": "..."}
+    用 other-world embed 算语义相似度，命中阈值（默认 0.92）且图还在 → 返回旧图；
+    向量化服务不在线/索引为空/未命中 → hit=False，前端照常发起新 run。
+    """
+    query = request.get("query", "")
+    if not query:
+        return {"hit": False, "best_similarity": 0.0, "reason": "empty_query"}
+    return redis_cache.find_reusable(query)
+
+
 @app.post("/api/run")
 async def run_agent(request: dict):
     """
