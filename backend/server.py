@@ -19,6 +19,9 @@ from admin.persistence import get_overview as admin_get_overview
 from admin.persistence import get_runs as admin_get_runs
 from admin.persistence import get_run_snapshot as admin_get_run_snapshot
 
+# Redis 热缓存层（断连恢复 + 生产化）
+from state import redis_cache
+
 # 初始化 admin DB 表结构
 admin_init_db()
 
@@ -44,13 +47,21 @@ app.add_middleware(
 # 全局状态 store（每个 run 独立实例）
 _store = ReasoningGraphStore()
 
+
+def _redis_change_listener(kind: str, data: dict, meta: dict):
+    """图组件新增 → Redis RPUSH 增量追加（正常推进快路径）"""
+    redis_cache.append_item(meta.get("run_id", ""), kind, data, meta)
+
+
+_store.set_change_listener(_redis_change_listener)
+
 # 当前活跃的 ReactLoop 实例（打断端点用；单 store 天然只有一个活跃 run）
 _active_loop: Optional[ReactLoop] = None
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "project": "MindGlass"}
+    return {"status": "ok", "project": "MindGlass", **redis_cache.health()}
 
 
 @app.get("/api/tools")
@@ -61,7 +72,15 @@ def get_tools():
 
 @app.get("/api/graph")
 def get_graph():
-    """获取当前推理图状态"""
+    """获取当前推理图状态。
+
+    断连恢复：内存图为空（如后端重启）时从 Redis 热缓存重建，
+    位置由前端固定算法重排，不存坐标。
+    """
+    if not _store.nodes:
+        snapshot = redis_cache.load()
+        if snapshot.get("nodes"):
+            _store.load_from_dict(snapshot)
     return _store.to_dict()
 
 
@@ -95,6 +114,9 @@ async def run_agent(request: dict):
                 snapshot = _store.to_dict()
                 if snapshot.get("nodes"):
                     admin_save_run(snapshot)
+                    # Redis 整体覆盖：流结束时的图是权威的（含打断/状态变更），
+                    # 覆盖掉增量追加阶段的中间态
+                    redis_cache.overwrite(snapshot.get("meta", {}).get("run_id", ""), snapshot)
             except Exception as e:
                 # 落盘失败不影响用户端，仅日志记录
                 print(f"[admin] 保存 run 快照失败: {e}")
@@ -138,6 +160,8 @@ def retry_from(request: dict):
                 snapshot = _store.to_dict()
                 if snapshot.get("nodes"):
                     admin_save_run(snapshot)
+                    # 编辑/重放路径：后端算好的完整新图整体覆盖 Redis
+                    redis_cache.overwrite(snapshot.get("meta", {}).get("run_id", ""), snapshot)
             except Exception as e:
                 print(f"[admin] 保存 retry 快照失败: {e}")
 
@@ -176,6 +200,8 @@ async def retry_from_graph(request: dict):
                 snapshot = _store.to_dict()
                 if snapshot.get("nodes"):
                     admin_save_run(snapshot)
+                    # 编辑/重放路径：后端算好的完整新图整体覆盖 Redis
+                    redis_cache.overwrite(snapshot.get("meta", {}).get("run_id", ""), snapshot)
             except Exception as e:
                 print(f"[admin] 保存 retry_from_graph 快照失败: {e}")
 
