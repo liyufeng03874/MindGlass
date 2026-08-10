@@ -60,9 +60,13 @@
             :graph="graph"
             :isRunning="isRunning"
             :cutNodeId="cutNode?.id ?? null"
+            :disconnected="disconnected"
+            :autoRetrying="autoRetrying"
+            :autoRetryCount="autoRetryCount"
             @retry="onRetry"
             @interrupt="onInterrupt"
             @focus-answer="onFocusAnswer"
+            @reconnect="reconnect"
           />
         </div>
       </transition>
@@ -98,14 +102,15 @@ function checkMobile() {
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
-  // 断连恢复：页面加载时探测后端（后端内存空时会从 Redis 重建图）
-  tryRestoreFromCache()
+  // 断联恢复：不在 onMounted 时主动拉图。用户输入 query 后才发起 run。
+  // 后端重启后内存空时，GET /api/graph 会自己从 Redis 恢复到内存，前端无需主动触发。
+  // tryRestoreFromCache() 已移除
 })
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
 })
 
-const { graph, status, connected, rounds, clearRounds, isRunning, cutNode, sendMessage, interrupt, clearCut, retryFrom, tryRestoreFromCache } = useAgentGraph()
+const { graph, status, connected, rounds, clearRounds, isRunning, cutNode, disconnected, autoRetrying, autoRetryCount, sendMessage, interrupt, clearCut, retryFrom, tryRestoreFromCache, reconnect } = useAgentGraph()
 
 // ── 全局相位：从推理状态推导，驱动整站氛围层呼吸（水镜 v2.1 第一遍）──
 const { phase } = usePhase()

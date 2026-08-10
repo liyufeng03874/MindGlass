@@ -222,6 +222,45 @@ async def retry_from_graph(request: dict):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.post("/api/resume")
+async def resume_agent():
+    """断连续跑：从当前图的最后一个活跃节点继续推理。
+
+    前端断连重连后调用，后端从 Redis/内存恢复图状态后接着跑。
+    复用 react_loop 的 _decision_loop / _stream_plan 等已有逻辑。
+    """
+    # 确保内存图是最新的（后端重启时可能为空）
+    if not _store.nodes:
+        snapshot = redis_cache.load()
+        if snapshot.get("nodes"):
+            _store.load_from_dict(snapshot)
+
+    if not _store.nodes:
+        raise HTTPException(status_code=400, detail="无可用图状态，无法续跑")
+
+    loop = ReactLoop(_store)
+
+    async def event_stream():
+        global _active_loop
+        _active_loop = loop
+        try:
+            async for event in loop.resume():
+                yield event
+        finally:
+            _active_loop = None
+            try:
+                snapshot = _store.to_dict()
+                if snapshot.get("nodes"):
+                    admin_save_run(snapshot)
+                    redis_cache.overwrite(
+                        snapshot.get("meta", {}).get("run_id", ""), snapshot
+                    )
+            except Exception as e:
+                print(f"[admin] 保存 resume 快照失败: {e}")
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/load-demo")
 def load_demo(demo: str = Query(default="1")):
     """加载 demo 静态数据，支持数字编号（如 1、2、3）或完整文件名"""

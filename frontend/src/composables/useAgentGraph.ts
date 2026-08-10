@@ -33,6 +33,12 @@ export function useAgentGraph() {
   const status = ref('')
   const connected = ref(false)
   const isRunning = ref(false)
+  /** SSE 断连标记：true 时本地图保留、流程图显示重连按钮 */
+  const disconnected = ref(false)
+  /** 自动重连中：true 时按钮显示“正在尝试重连”且不可点击 */
+  const autoRetrying = ref(false)
+  /** 自动重连已尝试次数（0-3），用于按钮文案展示 */
+  const autoRetryCount = ref(0)
 
   /** 轮次数组：每轮 = 用户 query + 本轮后端推送的事件 blocks + 最终回答 */
   const rounds = ref<Round[]>([])
@@ -85,15 +91,9 @@ export function useAgentGraph() {
       const snapshot = await resp.json()
       if (!snapshot?.nodes || snapshot.nodes.length === 0) return false
       graph.value = snapshot as ReasoningGraph
-      roundCounter++
-      rounds.value.push({
-        id: `round_restore_${roundCounter}`,
-        query: snapshot.meta?.query || '（缓存恢复）',
-        blocks: [],
-        answer: finalAnswerOf(snapshot.nodes),
-      })
+      // 只恢复图到右侧思维面板，不往聊天区 push rounds（保持开场白干净）
       connected.value = true
-      status.value = '📡 已从缓存恢复上一次的思维图'
+      status.value = '📡 已从缓存恢复上一次的思维图，点「💡思维」查看'
       return true
     } catch (e) {
       return false
@@ -118,16 +118,17 @@ export function useAgentGraph() {
   }
 
   async function sendMessage(query: string) {
+    // 先立刻显示用户气泡 + 助手"规划中"占位，不让用户以为卡了
+    roundCounter++
+    const currentRoundId = `round_${roundCounter}`
+    rounds.value.push({ id: currentRoundId, query, blocks: [{ id: 'placeholder_plan', nodeId: '', type: 'plan', status: 'loading', title: '🤔 规划中...', content: '' }] })
+
     // ── 复用检查：语义相似的已缓存思维图直接渲染，不重跑 ──
     const reuse = await checkReuse(query)
     if (reuse && reuse.graph?.nodes?.length) {
-      roundCounter++
-      rounds.value.push({
-        id: `round_reuse_${roundCounter}`,
-        query,
-        blocks: [],
-        answer: finalAnswerOf(reuse.graph.nodes),
-      })
+      // 命中复用，更新已 push 的轮次
+      const r = rounds.value.find(r => r.id === currentRoundId)
+      if (r) r.answer = finalAnswerOf(reuse.graph.nodes)
       graph.value = reuse.graph as ReasoningGraph
       if (!conversationId) {
         conversationId = `conv_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`
@@ -145,10 +146,6 @@ export function useAgentGraph() {
       if (r.answer) pair.push({ role: 'assistant', content: r.answer.slice(0, 200) })
       return pair
     }).slice(-6)
-
-    // 新轮入队，后续 SSE 事件全部写进这一轮
-    roundCounter++
-    rounds.value.push({ id: `round_${roundCounter}`, query, blocks: [] })
 
     // 首轮生成会话 ID，后续轮复用（多轮对话关联）
     if (!conversationId) {
@@ -198,12 +195,88 @@ export function useAgentGraph() {
       let buffer = ''
 
       while (true) {
-        const { done, value } = await reader.read()
+        // 60s 超时：没收到数据就标记断连
+        const readPromise = reader.read()
+        const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
+          setTimeout(() => resolve({ timedOut: true }), 60000)
+        )
+        const result = await Promise.race([readPromise, timeoutPromise])
+
+        if ('timedOut' in result) {
+          // 60 秒没数据 → SSE 断连
+          // 关键：保留本地图（含 pending 预测节点），不拉 Redis 覆盖
+          connected.value = false
+          isRunning.value = false
+
+          // 本地 orphan pending 节点标灰
+          for (const node of graph.value.nodes) {
+            if (node.status === 'pending') {
+              node.status = 'discarded'
+              node.label = (node.label || '') + '（已中断）'
+            }
+          }
+          graph.value.nodes = [...graph.value.nodes]
+
+          // 当前轮 loading block 标记 done
+          for (const block of currentBlocks()) {
+            if (block.status === 'loading') block.status = 'done'
+          }
+
+          // ── 自动重连：每 30 秒尝试一次，最多 3 次失败后显示手动按钮 ──
+          const MAX_AUTO_RETRIES = 3
+          let autoRetryCount = 0
+          let autoRetryTimer: ReturnType<typeof setInterval> | null = null
+
+          // 进入自动重连状态
+          autoRetrying.value = true
+          autoRetryCount.value = 0
+          disconnected.value = false  // 自动重连期间不显示手动按钮
+
+          const tryAutoReconnect = async () => {
+            autoRetryCount.value++
+            status.value = `🔄 正在恢复连接 (${autoRetryCount.value}/${MAX_AUTO_RETRIES})...`
+            try {
+              const probe = await fetch(`${API_BASE}/api/health`)
+              if (probe.ok) {
+                // 后端恢复了，停止定时器，执行重连
+                if (autoRetryTimer) { clearInterval(autoRetryTimer); autoRetryTimer = null }
+                autoRetrying.value = false
+                await reconnect()
+                return
+              }
+            } catch (e) { /* 后端还没起来 */ }
+
+            if (autoRetryCount.value >= MAX_AUTO_RETRIES) {
+              // 3 次都失败 → 切换为手动重连模式
+              if (autoRetryTimer) { clearInterval(autoRetryTimer); autoRetryTimer = null }
+              autoRetrying.value = false
+              disconnected.value = true
+              status.value = '📡 连接断开 · 点击图中按钮重连'
+            }
+          }
+
+          // 立即尝试第一次
+          await tryAutoReconnect()
+          // 如果还没成功且没超限，启动定时器
+          if (!connected.value && autoRetryCount.value < MAX_AUTO_RETRIES) {
+            autoRetryTimer = setInterval(async () => {
+              if (connected.value) { clearInterval(autoRetryTimer!); return }
+              await tryAutoReconnect()
+              if (connected.value || autoRetryCount.value >= MAX_AUTO_RETRIES) {
+                clearInterval(autoRetryTimer!)
+              }
+            }, 30000)
+          }
+
+          break  // 旧 stream 已断，结束 readLoop
+        }
+
+        const { done, value } = result
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
-        buffer = lines.pop() || ''  // 保留未完成的行
+        buffer = lines.pop() || ''
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -264,6 +337,9 @@ export function useAgentGraph() {
         const title = BLOCK_TITLES[node_type] || node_type
 
         const blocks = currentBlocks()
+        // 清掉占位 block（用户发消息时加的"规划中"）
+        const placeholderIdx = blocks.findIndex(b => b.id === 'placeholder_plan')
+        if (placeholderIdx >= 0) blocks.splice(placeholderIdx, 1)
         let block = blocks.find((b: LeftBlock) => b.id === blockId)
         if (!block) {
           block = {
@@ -334,6 +410,9 @@ export function useAgentGraph() {
           const blockType: LeftBlock['type'] = 'toolcall'
           const blockId = `block_${node.id}`
           const blocks = currentBlocks()
+          // 清掉占位 block
+          const placeholderIdx = blocks.findIndex(b => b.id === 'placeholder_plan')
+          if (placeholderIdx >= 0) blocks.splice(placeholderIdx, 1)
           let block = blocks.find((b: LeftBlock) => b.id === blockId)
 
           // 后端 node_complete 事件将 tool_name/params/result_preview/result_full 放在 event.data 顶层
@@ -790,11 +869,181 @@ export function useAgentGraph() {
     }
   }
 
+  /** 手动重连：从 Redis 拉最新图，增量合并到本地图（补新节点、保留本地已有状态）。
+   *  只在 disconnected=true 时可调用；成功后 cleared disconnected。 */
+  async function reconnect() {
+    if (!disconnected.value) return
+    status.value = '🔄 正在重连...'
+    try {
+      const resp = await fetch(`${API_BASE}/api/graph`)
+      if (!resp.ok) {
+        status.value = '❌ 重连失败：后端不可达'
+        return
+      }
+      const snapshot = await resp.json()
+      if (!snapshot?.nodes?.length) {
+        status.value = '📡 后端无缓存图，请重新提问'
+        disconnected.value = false
+        return
+      }
+
+      // ── 增量合并策略 ──
+      // 1. 后端有但本地没有的节点 → 补进本地图（断连期间后端可能又推了几个）
+      // 2. 本地有但后端没有的 pending/discarded 节点 → 保留（前端预测产生的虚拟节点）
+      // 3. 两边都有的节点 → 用后端版本（后端是权威源）
+      const localNodeMap = new Map(graph.value.nodes.map(n => [n.id, n]))
+      const remoteNodeIds = new Set(snapshot.nodes.map((n: AgentNode) => n.id))
+
+      const mergedNodes: AgentNode[] = []
+      // 先放后端节点（权威）
+      for (const rn of snapshot.nodes as AgentNode[]) {
+        mergedNodes.push(rn)
+      }
+      // 再补本地独有且非 pending 的节点（如前端预测后被 discard 的）
+      for (const ln of graph.value.nodes) {
+        if (!remoteNodeIds.has(ln.id) && ln.status !== 'pending') {
+          mergedNodes.push(ln)
+        }
+      }
+
+      // 边也做合并：后端边为主，本地独有的边保留
+      const remoteEdgeKeys = new Set(
+        (snapshot.edges as AgentEdge[]).map((e: AgentEdge) => `${e.from}->${e.to}`)
+      )
+      const mergedEdges: AgentEdge[] = [...(snapshot.edges as AgentEdge[])]
+      for (const le of graph.value.edges) {
+        const key = `${le.from}->${le.to}`
+        if (!remoteEdgeKeys.has(key)) {
+          mergedEdges.push(le)
+        }
+      }
+
+      graph.value = {
+        nodes: mergedNodes,
+        edges: mergedEdges,
+        branches: snapshot.branches || graph.value.branches,
+        meta: snapshot.meta || graph.value.meta,
+      }
+
+      // 更新当前轮 answer（如果后端图里有完成的 Answer）
+      const r = rounds.value[rounds.value.length - 1]
+      if (r) r.answer = finalAnswerOf(mergedNodes)
+
+      // ── 补 pending：避免合并后图中出现“无 pending 也无 Answer”的断裂感 ──
+      // 场景：断连时本地 pending 被标 discarded，Redis 里也没有对应真实节点
+      // → 合并后图的末端秃了。根据最后一个活跃节点重新预测下一步。
+      const hasAnswer = mergedNodes.some(
+        (n: AgentNode) => n.type === 'Answer' && n.status === 'done' && !n.data?.safety_interrupt
+      )
+      const hasPending = mergedNodes.some((n: AgentNode) => n.status === 'pending')
+      if (!hasAnswer && !hasPending) {
+        // 找最后一个活跃（非 discarded/branch/replaced）节点作为预测锚点
+        const activeNodes = mergedNodes.filter(
+          (n: AgentNode) => n.status !== 'discarded' && n.status !== 'branch' && n.status !== 'replaced' && n.status !== 'pending'
+        )
+        const lastActive = activeNodes.length > 0
+          ? activeNodes.reduce((a, b) => (a.step_index ?? 0) >= (b.step_index ?? 0) ? a : b)
+          : null
+        if (lastActive) {
+          // 复用已有的预测逻辑
+          if (lastActive.type === 'Plan') {
+            pushPendingDecision(lastActive)
+          } else if (lastActive.type === 'ToolCall') {
+            pushPendingObserve(lastActive)
+          } else if (lastActive.type === 'Observe') {
+            pushPendingPlan(lastActive)
+          }
+        }
+      }
+
+      disconnected.value = false
+      connected.value = true
+
+      if (hasAnswer) {
+        status.value = '✅ 重连成功 · 推理已完成'
+        isRunning.value = false
+      } else {
+        // ── 自动续跑：没有 Answer → 调 /api/resume 接 SSE 流继续推理 ──
+        status.value = '🔄 重连成功 · 正在恢复推理...'
+        isRunning.value = true
+        cutNode.value = null
+        interruptedReceived = false
+        inRetryBranch = false
+
+        // 保留预测 pending：后端真实节点到达时 handleEvent 的 pending 存活规则会自动清除
+        // 不提前清除，避免 resume SSE 流首个事件到达前图中出现“无 pending 也无真实节点”的断裂感
+
+        try {
+          const resumeResp = await fetch(`${API_BASE}/api/resume`, { method: 'POST' })
+          if (!resumeResp.ok || !resumeResp.body) {
+            status.value = '❌ 续跑失败：后端返回错误'
+            isRunning.value = false
+            return
+          }
+
+          const reader = resumeResp.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+
+          while (true) {
+            const readPromise = reader.read()
+            const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
+              setTimeout(() => resolve({ timedOut: true }), 60000)
+            )
+            const result = await Promise.race([readPromise, timeoutPromise])
+
+            if ('timedOut' in result) {
+              connected.value = false
+              disconnected.value = true
+              isRunning.value = false
+              for (const node of graph.value.nodes) {
+                if (node.status === 'pending') {
+                  node.status = 'discarded'
+                  node.label = (node.label || '') + '（已中断）'
+                }
+              }
+              graph.value.nodes = [...graph.value.nodes]
+              for (const block of currentBlocks()) {
+                if (block.status === 'loading') block.status = 'done'
+              }
+              status.value = '📡 连接再次断开 · 点击图中按钮重连'
+              break
+            }
+
+            const { done, value } = result
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const parsed = JSON.parse(line.slice(6)) as SSEEvent
+                  handleEvent(parsed)
+                } catch (e) { /* ignore parse errors */ }
+              }
+            }
+          }
+        } catch (e) {
+          status.value = '❌ 续跑失败：网络异常'
+          isRunning.value = false
+        }
+      }
+    } catch (e) {
+      status.value = '❌ 重连失败：网络异常'
+    }
+  }
+
   return {
     graph,
     status,
     connected,
     isRunning,
+    disconnected,
+    autoRetrying,
+    autoRetryCount,
     rounds,
     clearRounds,
     cutNode,
@@ -804,5 +1053,6 @@ export function useAgentGraph() {
     retryFrom,
     retryFromGraph,
     tryRestoreFromCache,
+    reconnect,
   }
 }

@@ -612,6 +612,30 @@ function getDecisionLabel(block: LeftBlock): string {
 .thought-content.is-collapsed .tool-result { max-height: 200px; }
 .thought-content:not(.is-collapsed) .tool-result { max-height: none; }
 
+/* 工具结果 / JSON 原文 / 搜索结果 webkit 滚动条主题化 */
+.tool-result::-webkit-scrollbar,
+.json-body::-webkit-scrollbar,
+.result-item::-webkit-scrollbar {
+  width: 6px;
+}
+.tool-result::-webkit-scrollbar-track,
+.json-body::-webkit-scrollbar-track,
+.result-item::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+}
+.tool-result::-webkit-scrollbar-thumb,
+.json-body::-webkit-scrollbar-thumb,
+.result-item::-webkit-scrollbar-thumb {
+  background: rgba(167, 139, 250, 0.35);
+  border-radius: 3px;
+}
+.tool-result::-webkit-scrollbar-thumb:hover,
+.json-body::-webkit-scrollbar-thumb:hover,
+.result-item::-webkit-scrollbar-thumb:hover {
+  background: rgba(167, 139, 250, 0.6);
+}
+
 .tool-results-readable {
   display: flex;
   flex-direction: column;

@@ -88,6 +88,7 @@ class ReactLoop:
         self.store = store
         self.run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.query = ""
+        self.history: list = []
         self.step_index = 0
         self._last_node: Optional[ReasoningNode] = None
         self._last_stream_content: str = ""
@@ -1374,6 +1375,133 @@ class ReactLoop:
 
         else:
             yield self._emit("error", {"message": f"不支持重试 {node.type} 节点"})
+            yield self._emit("run_complete", {"graph": self.store.to_dict()})
+
+    async def resume(self) -> AsyncGenerator[str, None]:
+        """断连续跑：从图中最后一个活跃节点的下一步继续推理。
+
+        与 retry_from 的区别：不截断、不废弃、不编辑——纯粹从断点接着走。
+        复用 _decision_loop / _stream_plan / _stream_observe / _execute_tools 等已有逻辑。
+        """
+        yield self._emit("status", {"message": "🔄 正在恢复推理..."})
+
+        # 1. 找最后一个活跃（非 discarded/branch/replaced/pending）节点
+        active_nodes = [
+            n for n in self.store.nodes
+            if n.status not in ("discarded", "branch", "replaced", "pending")
+        ]
+        if not active_nodes:
+            yield self._emit("error", {"message": "图中无活跃节点，无法续跑"})
+            return
+
+        last_node = max(active_nodes, key=lambda n: n.step_index)
+        self.step_index = last_node.step_index + 1
+
+        # 2. 收集已有的 observe_outputs
+        observe_outputs = []
+        for node in self.store.nodes:
+            if node.type == "Observe" and node.status not in ("discarded", "branch", "replaced"):
+                if "observe_output" in node.data:
+                    observe_outputs.append(node.data["observe_output"])
+
+        # 3. 恢复 query（从 meta 或 store 中取）
+        if not self.query:
+            self.query = self.store.meta.query or ""
+
+        # 4. 根据最后节点类型 dispatch 到下一阶段
+        if last_node.type == "Plan":
+            plan_result = last_node.data
+            plan_count = self.store.meta.plan_count or 1
+
+            if plan_result.get("decision") == "sufficient":
+                # 信息充足 → 直接生成回答
+                yield self._emit("status", {"message": "💬 生成回答..."})
+                async for event in self._answer_phase(observe_outputs, plan_result):
+                    yield event
+            elif plan_result.get("decision") == "terminate":
+                # 强制终止 → 降级回答
+                yield self._emit("status", {"message": "⚠️ 强制终止，生成降级回答..."})
+                async for event in self._answer_phase(observe_outputs, plan_result):
+                    yield event
+            else:
+                # need_more → 进入决策回环补搜
+                yield self._emit("status", {"message": f"🔍 继续补搜（第 {plan_count} 轮）..."})
+                async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
+                    yield event
+
+        elif last_node.type == "ToolCall":
+            # ToolCall 已完成 → 下一步是 Observe
+            tool_result = last_node.data.get("result", {})
+            self._last_raw_results = [tool_result]
+            self._last_tc_node_ids = [last_node.id]
+
+            # 检查是否有同 step 的并行 ToolCall 兄弟节点
+            parallel_group_id = last_node.data.get("parallel_group_id")
+            if parallel_group_id:
+                siblings = [
+                    n for n in active_nodes
+                    if n.type == "ToolCall"
+                    and n.data.get("parallel_group_id") == parallel_group_id
+                    and n.step_index == last_node.step_index
+                ]
+                if len(siblings) > 1:
+                    self._last_raw_results = [
+                        n.data.get("result", {}) for n in siblings
+                    ]
+                    self._last_tc_node_ids = [n.id for n in siblings]
+
+            async for event in self._stream_observe(observe_outputs):
+                yield event
+            if self.interrupted:
+                return
+            self.step_index += 1
+
+            # Observe 完成 → Plan 决策
+            plan_count = (self.store.meta.plan_count or 1) + 1
+            if plan_count > MAX_PLAN_COUNT:
+                plan_count = MAX_PLAN_COUNT
+            yield self._emit("status", {"message": f"🤔 第 {plan_count} 轮决策..."})
+            async for event in self._stream_plan(plan_count, observe_outputs):
+                yield event
+            if self.interrupted:
+                return
+            self.step_index += 1
+            self.store.meta.plan_count = plan_count
+
+            for n in reversed(self.store.nodes):
+                if n.type == "Plan":
+                    plan_result = n.data
+                    break
+            async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
+                yield event
+
+        elif last_node.type == "Observe":
+            # Observe 已完成 → 下一步是 Plan 决策
+            plan_count = (self.store.meta.plan_count or 1) + 1
+            if plan_count > MAX_PLAN_COUNT:
+                plan_count = MAX_PLAN_COUNT
+            yield self._emit("status", {"message": f"🤔 第 {plan_count} 轮决策..."})
+            async for event in self._stream_plan(plan_count, observe_outputs):
+                yield event
+            if self.interrupted:
+                return
+            self.step_index += 1
+            self.store.meta.plan_count = plan_count
+
+            for n in reversed(self.store.nodes):
+                if n.type == "Plan":
+                    plan_result = n.data
+                    break
+            async for event in self._decision_loop(plan_result, plan_count, observe_outputs):
+                yield event
+
+        elif last_node.type == "Answer":
+            # 已经有 Answer 了，不需要续跑
+            yield self._emit("status", {"message": "✅ 推理已完成，无需续跑"})
+            yield self._emit("run_complete", {"graph": self.store.to_dict()})
+
+        else:
+            yield self._emit("error", {"message": f"不支持从 {last_node.type} 节点续跑"})
             yield self._emit("run_complete", {"graph": self.store.to_dict()})
 
     async def retry_from_graph(self, step_index: int, old_nodes: list[dict],

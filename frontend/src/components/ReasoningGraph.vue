@@ -140,6 +140,21 @@
       </div>
     </div>
 
+    <!-- 断线重连浮层按钮：自动重连时显示进度，失败后变为可点击 -->
+    <div v-if="(disconnected || autoRetrying) && nodes.length > 0" class="reconnect-overlay">
+      <button
+        class="reconnect-btn"
+        :class="{ 'retrying': autoRetrying }"
+        :disabled="autoRetrying"
+        @click="!autoRetrying && emit('reconnect')"
+      >
+        {{ autoRetrying ? `🔄 正在尝试重连 (${autoRetryCount ?? 0}/3)...` : '📡 重新连接' }}
+      </button>
+      <span class="reconnect-hint">
+        {{ autoRetrying ? '后端恢复后将自动继续推理' : '推理已中断 · 点击恢复最新状态' }}
+      </span>
+    </div>
+
     <!-- 废弃回答弹窗：被截断重试前的旧版回答，仅供对比参考 -->
     <div v-if="deprecatedAnswer" class="deprecated-overlay" @click.self="deprecatedAnswer = null">
       <div class="deprecated-modal">
@@ -168,12 +183,16 @@ const props = defineProps<{
   graph: ReasoningGraph | null
   isRunning: boolean
   cutNodeId: string | null
+  disconnected?: boolean
+  autoRetrying?: boolean
+  autoRetryCount?: number
 }>()
 
 const emit = defineEmits<{
   (e: 'retry', stepIndex: number, originalNode: any, editedData: Record<string, any>): void
   (e: 'interrupt', node: AgentNode): void
   (e: 'focus-answer'): void
+  (e: 'reconnect'): void
 }>()
 const graphRef = computed(() => props.graph)
 const cutIdRef = computed(() => props.cutNodeId ?? null)
@@ -1024,6 +1043,69 @@ label {
   background: rgba(255, 255, 255, 0.08);
   color: #6b6b80;
   cursor: not-allowed;
+}
+
+/* ── 断线重连浮层按钮 ── */
+.reconnect-overlay {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 90;
+  pointer-events: auto;
+}
+
+.reconnect-btn {
+  padding: 12px 32px;
+  background: rgba(96, 165, 250, 0.9);
+  color: #0a0e1f;
+  border: 2px solid rgba(96, 165, 250, 0.6);
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 20px rgba(96, 165, 250, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: all 0.25s ease;
+  animation: reconnectPulse 2s ease-in-out infinite;
+}
+
+.reconnect-btn:hover:not(:disabled) {
+  background: rgba(147, 187, 252, 0.95);
+  box-shadow: 0 0 30px rgba(96, 165, 250, 0.6), 0 4px 20px rgba(0, 0, 0, 0.4);
+  transform: scale(1.05);
+}
+
+.reconnect-btn.retrying {
+  background: rgba(96, 165, 250, 0.5);
+  cursor: wait;
+  animation: reconnectPulse 1.5s ease-in-out infinite;
+}
+
+.reconnect-hint {
+  font-size: 12px;
+  color: rgba(192, 192, 220, 0.8);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.5px;
+}
+
+@keyframes reconnectPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(96, 165, 250, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3); }
+  50% { box-shadow: 0 0 32px rgba(96, 165, 250, 0.7), 0 4px 20px rgba(0, 0, 0, 0.4); }
+}
+
+@media (max-width: 768px) {
+  .reconnect-overlay {
+    bottom: 72px; /* 手机端避开底部导航栏 */
+  }
+  .reconnect-btn {
+    padding: 14px 28px;
+    font-size: 16px;
+  }
 }
 
 /* ═══ 手机端响应式增强 ═══ */
