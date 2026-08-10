@@ -17,6 +17,10 @@
         <div class="card-label">完答率</div>
       </div>
       <div class="card">
+        <div class="card-value" :class="{ 'card-warn': overview.no_answer_count > 0 }">{{ overview.no_answer_count }}</div>
+        <div class="card-label">未完成回答</div>
+      </div>
+      <div class="card">
         <div class="card-value">{{ (overview.degraded_rate * 100).toFixed(1) }}%</div>
         <div class="card-label">降级率</div>
       </div>
@@ -221,6 +225,7 @@ interface Overview {
   total_runs: number
   answer_rate: number
   degraded_rate: number
+  no_answer_count: number
   tool_error_total: number
   avg_duration_ms: number
 }

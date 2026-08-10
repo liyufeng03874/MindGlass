@@ -255,6 +255,10 @@ export function useAgentGraph() {
                 if (autoRetryTimer) { clearInterval(autoRetryTimer); autoRetryTimer = null }
                 autoRetrying.value = false
                 logEvent('reconnect', `auto_retry_${autoRetryCount.value}`)
+                // 关键：reconnect() 内部有 if (!disconnected.value) return 守卫
+                // 自动重连期间 disconnected 被设为 false（隐藏手动按钮），
+                // 必须先置 true 才能让 reconnect() 正常执行增量合并+续跑
+                disconnected.value = true
                 await reconnect()
                 return
               }
@@ -304,8 +308,63 @@ export function useAgentGraph() {
           }
         }
       }
-    }).catch(err => {
+    }).catch(async (err) => {
       console.error('Run error:', err)
+      // SSE reader 抛网络错误（后端被杀/网络断开）→ 也记一次断连
+      // timeout 路径已在上面单独上报，这里只补网络异常的情况
+      if (connected.value) {
+        connected.value = false
+        isRunning.value = false
+        for (const node of graph.value.nodes) {
+          if (node.status === 'pending') {
+            node.status = 'discarded'
+            node.label = (node.label || '') + '（已中断）'
+          }
+        }
+        graph.value.nodes = [...graph.value.nodes]
+        for (const block of currentBlocks()) {
+          if (block.status === 'loading') block.status = 'done'
+        }
+        logEvent('disconnect', `network_error: ${err?.message || 'unknown'}`)
+        // 进入自动重连（复用同一逻辑）
+        autoRetrying.value = true
+        autoRetryCount.value = 0
+        disconnected.value = false
+        const MAX_AUTO_RETRIES = 3
+        let autoRetryTimer: ReturnType<typeof setInterval> | null = null
+        const tryAutoReconnect = async () => {
+          autoRetryCount.value++
+          status.value = `🔄 正在恢复连接 (${autoRetryCount.value}/${MAX_AUTO_RETRIES})...`
+          try {
+            const probe = await fetch(`${API_BASE}/api/health`)
+            if (probe.ok) {
+              if (autoRetryTimer) { clearInterval(autoRetryTimer); autoRetryTimer = null }
+              autoRetrying.value = false
+              logEvent('reconnect', `auto_retry_${autoRetryCount.value}`)
+              disconnected.value = true
+              await reconnect()
+              return
+            }
+          } catch (e) { /* 后端还没起来 */ }
+          if (autoRetryCount.value >= MAX_AUTO_RETRIES) {
+            if (autoRetryTimer) { clearInterval(autoRetryTimer); autoRetryTimer = null }
+            autoRetrying.value = false
+            disconnected.value = true
+            logEvent('auto_retry_exhausted', `3 retries failed`)
+            status.value = '📡 连接断开 · 点击图中按钮重连'
+          }
+        }
+        await tryAutoReconnect()
+        if (!connected.value && autoRetryCount.value < MAX_AUTO_RETRIES) {
+          autoRetryTimer = setInterval(async () => {
+            if (connected.value) { clearInterval(autoRetryTimer!); return }
+            await tryAutoReconnect()
+            if (connected.value || autoRetryCount.value >= MAX_AUTO_RETRIES) {
+              clearInterval(autoRetryTimer!)
+            }
+          }, 30000)
+        }
+      }
     })
   }
 

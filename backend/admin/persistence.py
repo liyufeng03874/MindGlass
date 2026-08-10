@@ -129,8 +129,13 @@ def _compute_stats(snapshot: dict) -> dict:
             plan_count += 1
         elif ntype == "ToolCall":
             toolcall_count += 1
+            # 工具失败：status=error 或 output 为空（后端没启/返回空结果）
             if status == "error":
                 tool_error_count += 1
+            else:
+                output = n.get("data", {}).get("output", "")
+                if not output or (isinstance(output, str) and not output.strip()):
+                    tool_error_count += 1
         elif ntype == "Observe":
             observe_count += 1
         elif ntype == "Answer":
@@ -330,11 +335,14 @@ def get_overview() -> dict:
         answer_rate = answer_count / total_runs if total_runs > 0 else 0.0
         degraded_rate = degraded_count / total_runs if total_runs > 0 else 0.0
 
+        no_answer_count = total_runs - answer_count
+
         return {
             # 基础指标
             "total_runs": total_runs,
             "answer_rate": round(answer_rate, 4),
             "degraded_rate": round(degraded_rate, 4),
+            "no_answer_count": no_answer_count,
             "tool_error_total": row["tool_error_total"] or 0,
             "avg_duration_ms": round(row["avg_duration_ms"] or 0, 1),
             # 断连恢复指标
