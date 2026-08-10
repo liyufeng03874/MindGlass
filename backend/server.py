@@ -18,6 +18,8 @@ from admin.persistence import init_db as admin_init_db, save_run as admin_save_r
 from admin.persistence import get_overview as admin_get_overview
 from admin.persistence import get_runs as admin_get_runs
 from admin.persistence import get_run_snapshot as admin_get_run_snapshot
+from admin.persistence import save_event as admin_save_event
+from admin.persistence import mark_run_resumed as admin_mark_run_resumed
 
 # Redis 热缓存层（断连恢复 + 生产化）
 from state import redis_cache
@@ -240,6 +242,10 @@ async def resume_agent():
 
     loop = ReactLoop(_store)
 
+    run_id = _store.meta.run_id or ""
+    conv_id = _store.meta.conversation_id or ""
+    admin_save_event("resume", run_id, conv_id)
+
     async def event_stream():
         global _active_loop
         _active_loop = loop
@@ -252,13 +258,37 @@ async def resume_agent():
                 snapshot = _store.to_dict()
                 if snapshot.get("nodes"):
                     admin_save_run(snapshot)
+                    admin_mark_run_resumed(run_id)
                     redis_cache.overwrite(
                         snapshot.get("meta", {}).get("run_id", ""), snapshot
                     )
+                    # 检查是否有 Answer → 续跑成功
+                    has_answer = any(
+                        n.get("type") == "Answer" and n.get("status") == "done"
+                        for n in snapshot.get("nodes", [])
+                    )
+                    if has_answer:
+                        admin_save_event("resume_success", run_id, conv_id)
             except Exception as e:
                 print(f"[admin] 保存 resume 快照失败: {e}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/events/log")
+def log_event(request: dict):
+    """前端上报运维事件（断连/重连/续跑/自动重试失败等）。
+
+    body: {"event_type": "disconnect|reconnect|auto_retry_exhausted", "run_id": "...", "detail": "..."}
+    """
+    event_type = request.get("event_type", "")
+    if not event_type:
+        raise HTTPException(status_code=400, detail="event_type is required")
+    run_id = request.get("run_id", "")
+    conversation_id = request.get("conversation_id", "")
+    detail = request.get("detail", "")
+    admin_save_event(event_type, run_id, conversation_id, detail)
+    return {"status": "ok"}
 
 
 @app.post("/api/load-demo")

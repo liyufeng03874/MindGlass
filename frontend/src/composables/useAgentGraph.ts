@@ -30,6 +30,17 @@ export function useAgentGraph() {
     branches: [],
     meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
   })
+  /** 上报运维事件到后端（断连/重连/续跑/自动重试失败等），静默失败不影响主流程 */
+  function logEvent(eventType: string, detail: string = '') {
+    const runId = graph.value?.meta?.run_id || ''
+    const convId = graph.value?.meta?.conversation_id || ''
+    fetch(`${API_BASE}/api/events/log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_type: eventType, run_id: runId, conversation_id: convId, detail }),
+    }).catch(() => { /* 静默失败 */ })
+  }
+
   const status = ref('')
   const connected = ref(false)
   const isRunning = ref(false)
@@ -224,8 +235,10 @@ export function useAgentGraph() {
 
           // ── 自动重连：每 30 秒尝试一次，最多 3 次失败后显示手动按钮 ──
           const MAX_AUTO_RETRIES = 3
-          let autoRetryCount = 0
           let autoRetryTimer: ReturnType<typeof setInterval> | null = null
+
+          // 上报断连事件
+          logEvent('disconnect', `SSE timeout at step ${graph.value.meta?.current_step_index}`)
 
           // 进入自动重连状态
           autoRetrying.value = true
@@ -241,6 +254,7 @@ export function useAgentGraph() {
                 // 后端恢复了，停止定时器，执行重连
                 if (autoRetryTimer) { clearInterval(autoRetryTimer); autoRetryTimer = null }
                 autoRetrying.value = false
+                logEvent('reconnect', `auto_retry_${autoRetryCount.value}`)
                 await reconnect()
                 return
               }
@@ -251,6 +265,7 @@ export function useAgentGraph() {
               if (autoRetryTimer) { clearInterval(autoRetryTimer); autoRetryTimer = null }
               autoRetrying.value = false
               disconnected.value = true
+              logEvent('auto_retry_exhausted', `3 retries failed`)
               status.value = '📡 连接断开 · 点击图中按钮重连'
             }
           }
@@ -873,6 +888,7 @@ export function useAgentGraph() {
    *  只在 disconnected=true 时可调用；成功后 cleared disconnected。 */
   async function reconnect() {
     if (!disconnected.value) return
+    logEvent('reconnect', 'manual')
     status.value = '🔄 正在重连...'
     try {
       const resp = await fetch(`${API_BASE}/api/graph`)

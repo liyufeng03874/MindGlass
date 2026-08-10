@@ -6,7 +6,7 @@
       <span class="subtitle">Run 历史总览 · 思维重现</span>
     </header>
 
-    <!-- 总览指标卡 -->
+    <!-- 基础指标卡 -->
     <section class="overview-cards" v-if="overview">
       <div class="card">
         <div class="card-value">{{ overview.total_runs }}</div>
@@ -22,11 +22,61 @@
       </div>
       <div class="card">
         <div class="card-value">{{ overview.tool_error_total }}</div>
-        <div class="card-label">工具失败次数</div>
+        <div class="card-label">工具失败</div>
       </div>
       <div class="card">
         <div class="card-value">{{ formatDurationMs(overview.avg_duration_ms) }}</div>
         <div class="card-label">平均耗时</div>
+      </div>
+    </section>
+
+    <!-- 断连恢复指标卡 -->
+    <section class="overview-cards section-title" v-if="overview">
+      <h3 class="section-heading">📡 断连恢复</h3>
+      <div class="card">
+        <div class="card-value">{{ overview.disconnect_count }}</div>
+        <div class="card-label">断连次数</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ overview.reconnect_count }}</div>
+        <div class="card-label">重连成功</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ overview.resume_trigger_count }}</div>
+        <div class="card-label">续跑触发</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ overview.resume_success_count }}</div>
+        <div class="card-label">续跑成功</div>
+      </div>
+      <div class="card">
+        <div class="card-value card-warn">{{ overview.auto_retry_exhausted_count }}</div>
+        <div class="card-label">自动重试耗尽</div>
+      </div>
+    </section>
+
+    <!-- 运行质量指标卡 -->
+    <section class="overview-cards" v-if="overview">
+      <h3 class="section-heading">🔍 运行质量</h3>
+      <div class="card">
+        <div class="card-value">{{ overview.interrupted_count }}</div>
+        <div class="card-label">用户打断</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ overview.safety_interrupt_count }}</div>
+        <div class="card-label">安全拦截</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ overview.avg_plan_rounds }}</div>
+        <div class="card-label">平均决策轮数</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ formatDurationMs(overview.p50_duration_ms) }}</div>
+        <div class="card-label">P50 耗时</div>
+      </div>
+      <div class="card">
+        <div class="card-value">{{ formatDurationMs(overview.p95_duration_ms) }}</div>
+        <div class="card-label">P95 耗时</div>
       </div>
     </section>
     <section class="overview-cards" v-else>
@@ -383,6 +433,20 @@ onMounted(() => {
   font-size: 12px;
   color: #888;
   margin-top: 4px;
+}
+
+.card-value.card-warn {
+  color: #e74c3c;
+}
+
+.section-heading {
+  width: 100%;
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  margin: 0 0 -8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #eee;
 }
 
 /* 表格 */
