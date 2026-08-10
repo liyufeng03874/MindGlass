@@ -14,8 +14,9 @@ import sqlite3
 from datetime import datetime
 from typing import Optional
 
-# DB 路径：backend/data/mindglass_admin.db
-_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+# DB 路径：backend/data/mindglass_admin.db（锚定到 backend/ 目录，不依赖 cwd）
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DB_DIR = os.path.join(_BACKEND_DIR, "data")
 DB_PATH = os.path.join(_DB_DIR, "mindglass_admin.db")
 
 
@@ -288,6 +289,8 @@ def mark_run_resumed(run_id: str):
 
 def get_overview() -> dict:
     """总览指标（含断连恢复 + 运行质量）"""
+    # 防御：表不存在时先初始化（兑底 init_db 未被调用的场景）
+    init_db()
     conn = _get_conn()
     try:
         # Run 级指标
