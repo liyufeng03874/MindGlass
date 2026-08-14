@@ -48,9 +48,10 @@ PLANNING_SYSTEM_PROMPT = """你是思小镜，由李雨峰和妹妹小晞共同�
 3. decision="terminate" 时不要填 steps
 4. params 必须包含 query 字段
 5. **工具选择规则**：
-   - 法律案件、法律条文、法律咨询 -> rag_retrieve
+   - 语料库、知识库、文档、论文、法律案件等已入库内容 -> rag_retrieve
    - 实时信息、新闻、最新数据 -> search
    - 其他情况优先用自身知识回答，不调工具
+6. **禁止擅自切换工具**：如果用户的问题是关于语料库/知识库内容的，必须始终使用 rag_retrieve，不得因为 rag_retrieve 没搜到结果就改用 search。rag_retrieve 没搜到时，应该如实告知用户“知识库中未找到相关内容”，而不是自作主张去网络搜索
 """
 
 # ── 决策判断 Prompt ──
@@ -81,6 +82,7 @@ DECISION_SYSTEM_PROMPT = f"""你是思小镜，由李雨峰和妹妹小晞共同
 注意：
 - 不要为了补搜而补搜。如果信息已经足够回答问题，直接 sufficient
 - 补搜的 query 不要和已经搜过的语义重复
+- **禁止擅自切换工具类型**：如果原始问题是关于语料库/知识库内容的，补搜仍然必须用 rag_retrieve，不得改用 search。rag_retrieve 没搜到时选 terminate，不要换成 search 继续找
 - terminate 时 partial_answer_note 要具体说明哪个方面不完整，不要泛泛而谈
 - 你只做决策，不要自己去搜索或生成回答
 """

@@ -107,27 +107,26 @@ async def tool_search(query: str, top_k: int = 5) -> dict:
 )
 async def tool_rag_retrieve(query: str, top_k: int = 5) -> dict:
     """
-    调用 other-world 的 RAG 检索接口
-    POST /api/chat/rag-es
+    调用 other-world 的纯检索接口（不做 LLM 生成）
+    POST /api/chat/retrieve
     """
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                f"{RAG_API_URL}/api/chat/rag-es",
+                f"{RAG_API_URL}/api/chat/retrieve",
                 json={"message": query},
             )
             if resp.status_code == 200:
                 data = resp.json()
                 return {
                     "query": query,
-                    "passages": data.get("sources", []),
-                    "answer": data.get("message", ""),
-                    "count": len(data.get("sources", [])),
+                    "passages": data.get("passages", []),
+                    "count": data.get("count", 0),
                 }
             else:
                 return {
                     "query": query,
-                    "error": f"RAG API error: {resp.status_code}",
+                    "error": f"RAG retrieve error: {resp.status_code}",
                     "passages": [],
                     "count": 0,
                 }
