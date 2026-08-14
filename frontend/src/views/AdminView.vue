@@ -148,7 +148,7 @@
               </tr>
               <!-- 子行：各轮 run -->
               <tr v-if="expandedConvs[group.convId]" v-for="(run, i) in group.runs" :key="run.run_id" class="conv-child">
-                <td class="id-cell"><span class="turn-badge">第{{ i + 1 }}轮</span></td>
+                <td class="id-cell"><span class="turn-badge">第{{ i + 1 }}轮</span> <code>{{ run.run_id }}</code></td>
                 <td class="query-cell">{{ run.query }}</td>
                 <td class="answer-cell" :title="run.final_answer || '无'">
                   {{ truncate(run.final_answer || '无', 40) }}

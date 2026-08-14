@@ -118,6 +118,7 @@ export function useAgentGraph() {
     rounds.value = []
     conversationId = null
     clearRoundsCache()
+    try { localStorage.removeItem(STORAGE_CONV_ID) } catch (e) { /* 静默 */ }
   }
 
   /** 截断点节点（打断后只有它能点重试；重试或新查询后清空） */
@@ -184,6 +185,7 @@ export function useAgentGraph() {
       graph.value = reuse.graph as ReasoningGraph
       if (!conversationId) {
         conversationId = `conv_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`
+        try { localStorage.setItem(STORAGE_CONV_ID, conversationId) } catch (e) { /* 静默 */ }
       }
       connected.value = true
       status.value = `♻️ 命中相似问题缓存（相似度 ${reuse.similarity}），复用已有思维图`
@@ -202,9 +204,10 @@ export function useAgentGraph() {
       return pair
     }).slice(-6)
 
-    // 首轮生成会话 ID，后续轮复用（多轮对话关联）
+    // 首轮生成会话 ID，后续轮复用（多轮对话关联）；持久化到 localStorage 防刷新丢失
     if (!conversationId) {
       conversationId = `conv_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`
+      try { localStorage.setItem(STORAGE_CONV_ID, conversationId) } catch (e) { /* 静默 */ }
     }
 
     status.value = '🤔 连接中...'
@@ -630,7 +633,9 @@ export function useAgentGraph() {
 
       case 'run_complete': {
         clearRunId()
-        clearRoundsCache()
+        // 不清 rounds 缓存：多轮对话中途刷新/事后查看都需要保留完整历史
+        // 只有用户主动清空（clearRounds）或 interrupted/error/safety_interrupt 才清
+        saveRounds()  // 最终状态再存一次
         shouldSaveRounds = false
         connected.value = false
         isRunning.value = false
