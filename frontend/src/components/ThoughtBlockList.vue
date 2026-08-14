@@ -318,11 +318,16 @@ function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
   if (arr.length === 0) return { type: 'empty' }
   const items = arr
     .filter((r: any) => r && (r.title || r.url || r.snippet || r.content || r.text))
-    .map((r: any) => ({
-      title: r.title || r.name || r.source || '无标题',
-      url: r.url || '',
-      snippet: r.snippet || r.content || r.text || '',
-    }))
+    .map((r: any) => {
+      // RAG 结果：source 取文件名而非完整路径
+      const rawTitle = r.title || r.name || r.source || '无标题'
+      const title = (!r.url && rawTitle.includes('/')) ? rawTitle.split('/').pop() : rawTitle
+      return {
+        title,
+        url: r.url || '',
+        snippet: r.snippet || r.content || r.text || '',
+      }
+    })
   if (items.length === 0) return { type: 'empty' }
   return { type: 'search_ok', items }
 }

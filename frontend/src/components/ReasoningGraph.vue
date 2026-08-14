@@ -232,19 +232,28 @@ const toolCallResult = computed(() => {
   if (!editingNode.value?.data?.result) return ''
   const r = editingNode.value.data.result
 
-  const results = r.result?.results || r.results
+  // 兼容三种格式：search 的 results、rag_retrieve 的 passages、旧版 rag-es 的 sources
+  const results = r.result?.results || r.result?.passages || r.result?.sources || r.results || r.passages || r.sources
   const answer = r.result?.answer || r.answer
 
   const parts: string[] = []
 
-  // 先放 answer 总结
+  // 先放 answer 总结（仅 search/旧版 rag-es 有）
   if (answer) {
     parts.push(`**摘要**：${answer}`)
   }
 
-  // 再分点列出搜索结果
+  // 分点列出检索结果
   if (Array.isArray(results) && results.length > 0) {
     const items = results.map((x: any, i: number) => {
+      // RAG 结果：content + source + score
+      if (x.content && !x.snippet && !x.url) {
+        const source = x.source ? ` (${x.source.split('/').pop()})` : ''
+        const score = x.score != null ? ` [相关度: ${x.score}]` : ''
+        const content = x.content.length > 500 ? x.content.slice(0, 500) + '...' : x.content
+        return `${i + 1}. **段落${i + 1}**${source}${score}\n${content}`
+      }
+      // Search 结果：title + url + snippet
       const title = x.title || x.url || '无标题'
       const snippet = x.snippet || x.content || ''
       const url = x.url ? ` ([链接](${x.url}))` : ''
