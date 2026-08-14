@@ -130,12 +130,13 @@ def _compute_stats(snapshot: dict) -> dict:
             plan_count += 1
         elif ntype == "ToolCall":
             toolcall_count += 1
-            # 工具失败：status=error 或 output 为空（后端没启/返回空结果）
+            # 工具失败：status=error 或 result 为空（后端没启/返回空结果）
+            # ⚠️ ToolCall 的结果在 data.result，不是 data.output（output 是 Plan/Answer 的字段）
             if status == "error":
                 tool_error_count += 1
             else:
-                output = n.get("data", {}).get("output", "")
-                if not output or (isinstance(output, str) and not output.strip()):
+                result = n.get("data", {}).get("result")
+                if result is None or (isinstance(result, str) and not result.strip()):
                     tool_error_count += 1
         elif ntype == "Observe":
             observe_count += 1

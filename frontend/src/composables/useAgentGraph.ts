@@ -4,6 +4,10 @@ import type {AgentNode, ReasoningGraph, SSEEvent, LeftBlock, Round} from '@/type
 // API 地址：生产环境通过 nginx 反代 /api，开发环境可覆盖 VITE_API_BASE_URL
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
+// ── localStorage 重连 key ──
+const STORAGE_RUN_ID = 'mindglass_run_id'
+const STORAGE_ROUNDS = 'mindglass_rounds'
+
 let pendingIdCounter = 0
 
 // ── Block 标题映射 ──
@@ -30,6 +34,42 @@ export function useAgentGraph() {
     branches: [],
     meta: { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
   })
+
+  // ── localStorage 重连：推理进行中持久化 runId，刷新/误关后可恢复 ──
+  function saveRunId(runId: string) {
+    if (runId) {
+      try { localStorage.setItem(STORAGE_RUN_ID, runId) } catch (e) { /* 静默 */ }
+    }
+  }
+  function clearRunId() {
+    try { localStorage.removeItem(STORAGE_RUN_ID) } catch (e) { /* 静默 */ }
+  }
+  function getPendingRunId(): string | null {
+    try { return localStorage.getItem(STORAGE_RUN_ID) } catch (e) { return null }
+  }
+
+  // ── localStorage 缓存 rounds（左侧聊天区），刷新后恢复 ──
+  function saveRounds() {
+    try {
+      localStorage.setItem(STORAGE_ROUNDS, JSON.stringify(rounds.value))
+    } catch (e) { /* 静默：quota exceeded 等 */ }
+  }
+  function restoreRounds(): boolean {
+    try {
+      const raw = localStorage.getItem(STORAGE_ROUNDS)
+      if (!raw) return false
+      const parsed = JSON.parse(raw) as Round[]
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        rounds.value = parsed
+        return true
+      }
+      return false
+    } catch (e) { return false }
+  }
+  function clearRoundsCache() {
+    try { localStorage.removeItem(STORAGE_ROUNDS) } catch (e) { /* 静默 */ }
+  }
+
   /** 上报运维事件到后端（断连/重连/续跑/自动重试失败等），静默失败不影响主流程 */
   function logEvent(eventType: string, detail: string = '') {
     const runId = graph.value?.meta?.run_id || ''
@@ -77,6 +117,7 @@ export function useAgentGraph() {
   function clearRounds() {
     rounds.value = []
     conversationId = null
+    clearRoundsCache()
   }
 
   /** 截断点节点（打断后只有它能点重试；重试或新查询后清空） */
@@ -146,6 +187,9 @@ export function useAgentGraph() {
       }
       connected.value = true
       status.value = `♻️ 命中相似问题缓存（相似度 ${reuse.similarity}），复用已有思维图`
+      // 复用命中 = 推理已完成，清 pending 标记 + 保存最终 rounds
+      clearRunId()
+      saveRounds()
       return
     }
 
@@ -169,6 +213,11 @@ export function useAgentGraph() {
     cutNode.value = null
     interruptedReceived = false
     inRetryBranch = false
+
+    // ── localStorage 重连：推理开始即标记 pending，刷新/误关后可恢复 ──
+    saveRunId('pending')
+    // 新轮次入队后立即缓存（handleEvent 之前就有内容了）
+    saveRounds()
 
     // 重置图状态
     graph.value = {
@@ -398,6 +447,16 @@ export function useAgentGraph() {
 
   function handleEvent(event: SSEEvent) {
     // console.log('[SSE]', event.type, event.data)
+
+    // ── localStorage 重连：首次拿到具体 run_id 时更新 pending 标记 ──
+    const currentRunId = graph.value?.meta?.run_id
+    if (currentRunId && getPendingRunId() === 'pending') {
+      saveRunId(currentRunId)
+    }
+
+    // 标记本轮是否需要保存 rounds（结束事件清除缓存后不再保存）
+    let shouldSaveRounds = true
+
     switch (event.type) {
       case 'status':
         status.value = event.data.message
@@ -570,6 +629,9 @@ export function useAgentGraph() {
       }
 
       case 'run_complete': {
+        clearRunId()
+        clearRoundsCache()
+        shouldSaveRounds = false
         connected.value = false
         isRunning.value = false
         cutNode.value = null
@@ -588,6 +650,9 @@ export function useAgentGraph() {
       }
 
       case 'interrupted': {
+        clearRunId()
+        clearRoundsCache()
+        shouldSaveRounds = false
         // 用户打断：后端已完成收尾（截断点后置灰），前端收束
         interruptedReceived = true
         if (event.data.graph) {
@@ -666,6 +731,9 @@ export function useAgentGraph() {
       }
 
       case 'safety_interrupt': {
+        clearRunId()
+        clearRoundsCache()
+        shouldSaveRounds = false
         // 安全策略拦截：清空当前回答，显示拦截提示
         const interruptText = event.data.text || '很抱歉，该回答包含不合规内容，已被安全策略拦截。'
         // 清空当前轮 Answer block 的内容，替换为拦截提示
@@ -684,10 +752,18 @@ export function useAgentGraph() {
       }
 
       case 'error':
+        clearRunId()
+        clearRoundsCache()
+        shouldSaveRounds = false
         status.value = `❌ 错误: ${event.data.message}`
         connected.value = false
         isRunning.value = false
         break
+    }
+
+    // ── 每个 SSE 事件处理后，同步缓存 rounds 到 localStorage（结束事件已清除缓存则跳过）──
+    if (shouldSaveRounds) {
+      saveRounds()
     }
   }
 
@@ -957,6 +1033,9 @@ export function useAgentGraph() {
       }
       const snapshot = await resp.json()
       if (!snapshot?.nodes?.length) {
+        // 后端无缓存图 → 恢复已不可能，清标记避免死循环弹窗
+        clearRunId()
+        clearRoundsCache()
         status.value = '📡 后端无缓存图，请重新提问'
         disconnected.value = false
         return
@@ -1111,6 +1190,25 @@ export function useAgentGraph() {
     }
   }
 
+  // ── localStorage 重连：页面加载时检测到未完成 run，用户确认后恢复 ──
+  async function resumePendingRun() {
+    const pendingId = getPendingRunId()
+    if (!pendingId) return false
+    // ⚠️ 不在这里 clearRunId！等推理真正结束（run_complete/interrupted/error）时由 handleEvent 清除。
+    // 这样推理进行中再次刷新仍能弹窗恢复。
+    // 先恢复左侧聊天区（rounds），再恢复右侧思维图（reconnect）
+    restoreRounds()
+    // 让现有 reconnect() 能执行（它要求 disconnected=true）
+    disconnected.value = true
+    await reconnect()
+    return true
+  }
+
+  function abandonPendingRun() {
+    clearRunId()
+    clearRoundsCache()
+  }
+
   return {
     graph,
     status,
@@ -1129,5 +1227,8 @@ export function useAgentGraph() {
     retryFromGraph,
     tryRestoreFromCache,
     reconnect,
+    getPendingRunId,
+    resumePendingRun,
+    abandonPendingRun,
   }
 }

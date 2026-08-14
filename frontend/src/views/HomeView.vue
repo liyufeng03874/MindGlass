@@ -99,18 +99,26 @@ const isMobile = ref(false)
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
 }
-onMounted(() => {
+onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
-  // 断联恢复：不在 onMounted 时主动拉图。用户输入 query 后才发起 run。
-  // 后端重启后内存空时，GET /api/graph 会自己从 Redis 恢复到内存，前端无需主动触发。
-  // tryRestoreFromCache() 已移除
+
+  // ── localStorage 重连：检测到未完成推理时弹窗询问 ──
+  const pendingId = getPendingRunId()
+  if (pendingId) {
+    const shouldResume = confirm('检测到上次未完成的推理，是否恢复？\n\n点「确定」继续等待结果，点「取消」放弃并开始新对话。')
+    if (shouldResume) {
+      await resumePendingRun()
+    } else {
+      abandonPendingRun()
+    }
+  }
 })
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile)
 })
 
-const { graph, status, connected, rounds, clearRounds, isRunning, cutNode, disconnected, autoRetrying, autoRetryCount, sendMessage, interrupt, clearCut, retryFrom, tryRestoreFromCache, reconnect } = useAgentGraph()
+const { graph, status, connected, rounds, clearRounds, isRunning, cutNode, disconnected, autoRetrying, autoRetryCount, sendMessage, interrupt, clearCut, retryFrom, tryRestoreFromCache, reconnect, getPendingRunId, resumePendingRun, abandonPendingRun } = useAgentGraph()
 
 // ── 全局相位：从推理状态推导，驱动整站氛围层呼吸（水镜 v2.1 第一遍）──
 const { phase } = usePhase()

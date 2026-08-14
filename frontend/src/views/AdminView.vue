@@ -1,5 +1,22 @@
 <template>
-  <div class="admin-page">
+  <!-- ── 密码门：未认证时只显示登录框 ── -->
+  <div v-if="!authenticated" class="auth-gate">
+    <div class="auth-box">
+      <h2>🔒 MindGlass Admin</h2>
+      <p class="auth-hint">请输入访问密码</p>
+      <input
+        v-model="passwordInput"
+        type="password"
+        placeholder="密码"
+        @keydown.enter="checkPassword"
+        autofocus
+      />
+      <button @click="checkPassword">进入</button>
+      <p v-if="authError" class="auth-error">❌ 密码错误</p>
+    </div>
+  </div>
+
+  <div v-else class="admin-page">
     <header class="admin-header">
       <router-link to="/" class="back-link">← 返回首页</router-link>
       <h1>🧠 MindGlass 后台管理</h1>
@@ -220,6 +237,31 @@ import ReasoningGraph from '../components/ReasoningGraph.vue'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
+// ── Admin 密码门（防一般人，密码硬编码在前端）──
+const ADMIN_PASSWORD = 'csbt34.YDHL12S'
+const AUTH_KEY = 'mindglass_admin_auth'
+const authenticated = ref(false)
+const passwordInput = ref('')
+const authError = ref(false)
+
+function checkPassword() {
+  if (passwordInput.value === ADMIN_PASSWORD) {
+    authenticated.value = true
+    authError.value = false
+    try { localStorage.setItem(AUTH_KEY, 'ok') } catch (e) { /* 静默 */ }
+  } else {
+    authError.value = true
+    passwordInput.value = ''
+  }
+}
+
+// 页面加载时检查是否已认证
+try {
+  if (localStorage.getItem(AUTH_KEY) === 'ok') {
+    authenticated.value = true
+  }
+} catch (e) { /* 静默 */ }
+
 // ── 指标 ──
 interface Overview {
   total_runs: number
@@ -370,6 +412,62 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ── Admin 密码门 ── */
+.auth-gate {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0e1f;
+}
+.auth-box {
+  text-align: center;
+  padding: 40px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  backdrop-filter: blur(16px);
+}
+.auth-box h2 {
+  color: #e0e0e0;
+  margin-bottom: 8px;
+}
+.auth-hint {
+  color: #888;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.auth-box input {
+  padding: 10px 16px;
+  font-size: 15px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  outline: none;
+  width: 200px;
+  margin-bottom: 12px;
+}
+.auth-box input:focus {
+  border-color: #a78bfa;
+}
+.auth-box button {
+  padding: 10px 24px;
+  font-size: 15px;
+  border: none;
+  border-radius: 8px;
+  background: #a78bfa;
+  color: #fff;
+  cursor: pointer;
+}
+.auth-box button:hover {
+  background: #8b6fe0;
+}
+.auth-error {
+  color: #ff7875;
+  font-size: 13px;
+  margin-top: 12px;
+}
 .admin-page {
   min-height: 100vh;
   background: #f5f7fa;
