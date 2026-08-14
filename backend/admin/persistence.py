@@ -11,7 +11,9 @@ MindGlass Admin 持久化层
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+_CN_TZ = timezone(timedelta(hours=8))
 from typing import Optional
 
 # DB 路径：backend/data/mindglass_admin.db（锚定到 backend/ 目录，不依赖 cwd）
@@ -185,7 +187,7 @@ def save_run(snapshot: dict) -> str:
     run_id = meta.get("run_id", "")
     query = meta.get("query", "")
     conversation_id = meta.get("conversation_id", "")
-    created_at = datetime.utcnow().isoformat()
+    created_at = datetime.now(_CN_TZ).isoformat()
 
     snapshot_json = json.dumps(snapshot, ensure_ascii=False)
 
@@ -225,7 +227,7 @@ def seed_run(run_id: str, snapshot: dict) -> bool:
 
     # 用 demo 文件名中的序号推算 created_at（demo_1 最早，demo_12 最晚）
     # 这里统一用一个基准时间 + 序号偏移
-    created_at = datetime.utcnow().isoformat()
+    created_at = datetime.now(_CN_TZ).isoformat()
 
     snapshot_json = json.dumps(snapshot, ensure_ascii=False)
 
@@ -265,7 +267,7 @@ def save_event(event_type: str, run_id: str = "", conversation_id: str = "", det
     try:
         conn.execute(
             "INSERT INTO events (event_type, run_id, conversation_id, detail, created_at) VALUES (?, ?, ?, ?, ?)",
-            (event_type, run_id, conversation_id, detail, datetime.utcnow().isoformat()),
+            (event_type, run_id, conversation_id, detail, datetime.now(_CN_TZ).isoformat()),
         )
         conn.commit()
     except Exception as e:
