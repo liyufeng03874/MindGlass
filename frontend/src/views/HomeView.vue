@@ -9,18 +9,20 @@
         <span :class="['status-dot', { active: connected }]"></span>
         <span>{{ status || '就绪' }}</span>
         <template v-if="graph.nodes.length === 0">
-          <input
-            v-model="demoInput"
-            class="demo-input"
-            placeholder="1"
-            @keydown.enter="loadTestData(demoInput || undefined)"
-          />
+          <select
+            v-model="selectedDemo"
+            class="demo-select"
+            :disabled="loadingDemo"
+          >
+            <option value="" disabled>选择测试用例...</option>
+            <option v-for="d in demoList" :key="d.name" :value="d.name">{{ d.label }}</option>
+          </select>
           <button
             class="toggle-graph-btn"
-            @click="loadTestData(demoInput || undefined)"
-            :disabled="demoLoaded || loadingDemo"
+            @click="loadTestData(selectedDemo)"
+            :disabled="!selectedDemo || demoLoaded || loadingDemo"
           >
-            📦 加载测试数据
+            {{ loadingDemo ? '⏳ 加载中...' : '📦 加载' }}
           </button>
         </template>
         <template v-else>
@@ -103,6 +105,12 @@ onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
 
+  // ── 加载测试用例列表 ──
+  fetch(`${import.meta.env.VITE_API_BASE_URL || '/api'}/list-demos`)
+    .then(res => res.json())
+    .then(data => { demoList.value = data.demos || [] })
+    .catch(() => { /* 静默失败，下拉框为空 */ })
+
   // ── localStorage 重连：检测到未完成推理时弹窗询问 ──
   const pendingId = getPendingRunId()
   if (pendingId) {
@@ -169,9 +177,13 @@ watch([isRunning, () => graph.value?.meta?.run_started_at], ([running, startedAt
 
 const showGraph = ref(true)
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
-const demoInput = ref('')
 const demoLoaded = ref(false)
 const loadingDemo = ref(false)
+
+// ── 测试用例下拉框 ──
+interface DemoItem { name: string; label: string }
+const demoList = ref<DemoItem[]>([])
+const selectedDemo = ref('')
 /** demo 加载时手动算过耗时，watch 不要覆盖 */
 const demoElapsedLocked = ref(false)
 
@@ -205,12 +217,12 @@ function onFocusAnswer() {
   }
 }
 
-function loadTestData(demoName: string = '1') {
-  if (demoLoaded.value) return // 已加载过，必须先清空
+function loadTestData(demoName: string) {
+  if (!demoName || demoLoaded.value) return // 未选择或已加载过，必须先清空
 
   loadingDemo.value = true
   // 调用后端加载 demo 数据，直接返回 graph
-  fetch(`${import.meta.env.VITE_API_BASE_URL || '/api'}/load-demo?demo=${demoName}`, { method: 'POST' })
+  fetch(`${import.meta.env.VITE_API_BASE_URL || '/api'}/load-demo?demo=${encodeURIComponent(demoName)}`, { method: 'POST' })
     .then(res => res.json())
     .then(data => {
       graph.value = data.graph
@@ -260,6 +272,7 @@ function clearDemo() {
   showGraph.value = true
   demoLoaded.value = false
   demoElapsedLocked.value = false
+  selectedDemo.value = ''
   totalElapsed.value = null
   status.value = '就绪'
   clearCut()
@@ -361,20 +374,27 @@ function clearDemo() {
   animation: pulse 1.5s infinite;
 }
 
-.demo-input {
+.demo-select {
   padding: 4px 8px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--panel-border);
   border-radius: 6px;
   font-size: 13px;
   color: var(--text-h);
-  width: 90px;
+  min-width: 180px;
+  max-width: 280px;
   outline: none;
+  cursor: pointer;
   transition: border-color 0.2s;
 }
 
-.demo-input:focus {
+.demo-select:focus {
   border-color: var(--accent);
+}
+
+.demo-select option {
+  background: #1a1e3a;
+  color: #e6e9f5;
 }
 
 .toggle-graph-btn {

@@ -338,24 +338,35 @@ import * as echarts from 'echarts'
 const plotPreviewRef = ref<HTMLElement | null>(null)
 let plotChartInstance: echarts.ECharts | null = null
 
+/** 初始化/刷新 plot 弹窗里的 ECharts */
+function initPlotPreview() {
+  const node = editingNode.value
+  if (!node || node.data?.tool !== 'plot') return
+  nextTick(() => {
+    const el = plotPreviewRef.value
+    if (!el) return
+    const r = node.data?.result?.result || node.data?.result
+    const opt = r?.echarts_option
+    if (opt && typeof opt === 'object') {
+      if (plotChartInstance) plotChartInstance.dispose()
+      plotChartInstance = echarts.init(el)
+      // 深拷贝避免修改原始数据
+      const chartOpt = JSON.parse(JSON.stringify(opt))
+      chartOpt.backgroundColor = 'transparent'
+      plotChartInstance.setOption(chartOpt)
+    } else {
+      el.innerHTML = '<span style="color:#f87171">无图表数据</span>'
+    }
+  })
+}
+
+// 监听编辑节点变化 → 如果是 plot 则延迟初始化图表
 watch(editingNode, (node) => {
   if (node?.data?.tool === 'plot') {
-    nextTick(() => {
-      if (plotPreviewRef.value) {
-        const r = node.data?.result?.result || node.data?.result
-        const opt = r?.echarts_option
-        if (opt) {
-          if (plotChartInstance) plotChartInstance.dispose()
-          plotChartInstance = echarts.init(plotPreviewRef.value)
-          opt.backgroundColor = 'transparent'
-          plotChartInstance.setOption(opt)
-        } else {
-          plotPreviewRef.value.innerHTML = '<span style="color:#f87171">无图表数据</span>'
-        }
-      }
-    })
+    // 双重 nextTick：第一次等 Vue 更新 DOM（v-if 切换），第二次等元素真正挂载
+    nextTick(() => { nextTick(initPlotPreview) })
   }
-}, { immediate: true })
+}, { immediate: false })
 
 /** v2: 渲染结构化 Observe 评估输出 */
 function buildStructuredObserve(obs: any): string {

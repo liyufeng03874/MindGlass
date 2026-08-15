@@ -292,6 +292,26 @@ def log_event(request: dict):
     return {"status": "ok"}
 
 
+@app.get("/api/list-demos")
+def list_demos():
+    """列出所有可用的 demo 文件，返回 [{name, label}] 供前端下拉框使用"""
+    import os
+    import re
+    docs_dir = os.path.join(os.path.dirname(__file__), "docs")
+    demos = []
+    for f in sorted(os.listdir(docs_dir)):
+        if not f.endswith(".txt"):
+            continue
+        # 从文件名提取可读标签：demo_1(3个百科问题).txt → "1 - 3个百科问题"
+        m = re.match(r'^demo_(\w+)\((.+)\)\.txt$', f)
+        if m:
+            label = f"{m.group(1)} - {m.group(2)}"
+        else:
+            label = f.replace('.txt', '')
+        demos.append({"name": f, "label": label})
+    return {"demos": demos}
+
+
 @app.post("/api/load-demo")
 def load_demo(demo: str = Query(default="1")):
     """加载 demo 静态数据，支持数字编号（如 1、2、3）或完整文件名"""
