@@ -1324,6 +1324,13 @@ label {
   border: 1px solid var(--panel-border);
   margin-top: 4px;
 }
+
+/* 节点弹窗内统一滚动条样式 */
+.editor-panel ::-webkit-scrollbar { width: 6px; height: 6px; }
+.editor-panel ::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 3px; }
+.editor-panel ::-webkit-scrollbar-thumb { background: rgba(167,139,250,0.35); border-radius: 3px; }
+.editor-panel ::-webkit-scrollbar-thumb:hover { background: rgba(167,139,250,0.6); }
+.editor-panel * { scrollbar-width: thin; scrollbar-color: rgba(167,139,250,0.35) rgba(255,255,255,0.04); }
 </style>
 
 <style>

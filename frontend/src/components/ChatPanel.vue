@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import MarkdownIt from 'markdown-it'
 import * as echarts from 'echarts'
 import type { Round, LeftBlock } from '../types/agent'
@@ -136,20 +136,32 @@ function initECharts() {
   })
 }
 
-// 轮次/回答变化时重新扫描并初始化图表
-watch(
-  () => props.rounds.map(r => r.answer?.length ?? 0),
-  () => initECharts(),
-  { deep: true }
-)
+// ── MutationObserver: 监听 DOM 变化自动初始化 ECharts ──
+let observer: MutationObserver | null = null
 
 onMounted(() => {
   initECharts()
+  // 用 MutationObserver 监听 messages 容器，任何 DOM 变化都扫描新 echarts-wrapper
+  if (messagesRef.value) {
+    observer = new MutationObserver(() => {
+      initECharts()
+    })
+    observer.observe(messagesRef.value, { childList: true, subtree: true, characterData: true })
+  }
   // 窗口 resize 时重排图表
-  window.addEventListener('resize', () => {
-    chartInstances.forEach(c => c.resize())
-  })
+  window.addEventListener('resize', handleResize)
 })
+
+onUnmounted(() => {
+  observer?.disconnect()
+  window.removeEventListener('resize', handleResize)
+  chartInstances.forEach(c => c.dispose())
+  chartInstances.clear()
+})
+
+function handleResize() {
+  chartInstances.forEach(c => c.resize())
+}
 
 /** 最终回答已产生时，过滤掉本轮的 answer 流式 block（避免和回答气泡重复） */
 function visibleBlocks(round: Round): LeftBlock[] {
