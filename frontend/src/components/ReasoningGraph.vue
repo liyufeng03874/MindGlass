@@ -79,7 +79,7 @@
           <!-- plot: 展示图表预览 -->
           <template v-else-if="currentToolName === 'plot'">
             <label>📈 图表生成</label>
-            <div ref="plotPreviewRef" class="plot-preview-container"></div>
+            <div :ref="(el: any) => initPlotRef(el)" class="plot-preview-container"></div>
           </template>
 
           <!-- 其他未知工具：兜底展示 -->
@@ -307,7 +307,11 @@ const toolCallResult = computed(() => {
 })
 
 // ── chatBI 工具弹窗辅助 ──
-const currentToolName = computed(() => editingNode.value?.data?.tool || '')
+const currentToolName = computed(() => {
+  const t = editingNode.value?.data?.tool || ''
+  console.log('[currentToolName]', t, 'node type:', editingNode.value?.type, 'data keys:', Object.keys(editingNode.value?.data || {}))
+  return t
+})
 const isSearchableTool = computed(() => ['search', 'rag_retrieve'].includes(currentToolName.value))
 
 const execSqlPreview = computed(() => {
@@ -335,38 +339,40 @@ const execSqlPreviewHtml = computed(() => {
 
 // plot 图表预览（节点打开时初始化）
 import * as echarts from 'echarts'
-const plotPreviewRef = ref<HTMLElement | null>(null)
 let plotChartInstance: echarts.ECharts | null = null
 
-/** 初始化/刷新 plot 弹窗里的 ECharts */
-function initPlotPreview() {
+/** plot 弹窗 ECharts：template ref callback，DOM 挂载时自动触发 */
+function initPlotRef(el: HTMLElement | null) {
+  console.log('[plot-ref] called, el:', el ? `${el.clientWidth}x${el.clientHeight}` : 'null')
+  if (!el) return
   const node = editingNode.value
+  console.log('[plot-ref] node:', node ? node.data?.tool : 'null')
   if (!node || node.data?.tool !== 'plot') return
-  nextTick(() => {
-    const el = plotPreviewRef.value
-    if (!el) return
-    const r = node.data?.result?.result || node.data?.result
-    const opt = r?.echarts_option
-    if (opt && typeof opt === 'object') {
-      if (plotChartInstance) plotChartInstance.dispose()
-      plotChartInstance = echarts.init(el)
-      // 深拷贝避免修改原始数据
-      const chartOpt = JSON.parse(JSON.stringify(opt))
-      chartOpt.backgroundColor = 'transparent'
-      plotChartInstance.setOption(chartOpt)
-    } else {
-      el.innerHTML = '<span style="color:#f87171">无图表数据</span>'
+  const r = node.data?.result?.result || node.data?.result
+  const opt = r?.echarts_option
+  console.log('[plot-ref] has opt:', !!opt, 'el size:', el.clientWidth, el.clientHeight)
+  if (opt && typeof opt === 'object') {
+    if (el.clientWidth === 0 || el.clientHeight === 0) {
+      console.warn('[plot-ref] DOM size is 0, deferring via requestAnimationFrame')
+      requestAnimationFrame(() => {
+        console.log('[plot-ref] after rAF, el size:', el.clientWidth, el.clientHeight)
+        if (plotChartInstance) plotChartInstance.dispose()
+        plotChartInstance = echarts.init(el)
+        const chartOpt = JSON.parse(JSON.stringify(opt))
+        chartOpt.backgroundColor = 'transparent'
+        plotChartInstance.setOption(chartOpt)
+      })
+      return
     }
-  })
-}
-
-// 监听编辑节点变化 → 如果是 plot 则延迟初始化图表
-watch(editingNode, (node) => {
-  if (node?.data?.tool === 'plot') {
-    // 双重 nextTick：第一次等 Vue 更新 DOM（v-if 切换），第二次等元素真正挂载
-    nextTick(() => { nextTick(initPlotPreview) })
+    if (plotChartInstance) plotChartInstance.dispose()
+    plotChartInstance = echarts.init(el)
+    const chartOpt = JSON.parse(JSON.stringify(opt))
+    chartOpt.backgroundColor = 'transparent'
+    plotChartInstance.setOption(chartOpt)
+  } else {
+    console.warn('[plot-ref] no echarts_option found, result keys:', Object.keys(r || {}))
   }
-}, { immediate: false })
+}
 
 /** v2: 渲染结构化 Observe 评估输出 */
 function buildStructuredObserve(obs: any): string {
@@ -519,7 +525,9 @@ const planSteps = computed(() => editingNode.value?.data?.steps || [])
 const editForm = ref<Record<string, any>>({})
 
 function onNodeClick({ node }: { node: { id: string } }) {
+  console.log('[onNodeClick] clicked node id:', node.id)
   const target = props.graph?.nodes.find(n => n.id === node.id)
+  console.log('[onNodeClick] found target:', target ? `${target.type} tool=${target.data?.tool} status=${target.status}` : 'NOT FOUND')
   if (!target) return
 
   // 前端预测的虚拟 pending 节点：不可点开编辑（自然没有截断/重试按钮）

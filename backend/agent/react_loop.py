@@ -122,9 +122,17 @@ class ReactLoop:
 
     # ── 基础设施 ──
 
+    @staticmethod
+    def _json_default(obj):
+        """json.dumps 自定义序列化：处理 Decimal / datetime 等 pymysql 常见类型"""
+        from decimal import Decimal
+        if isinstance(obj, Decimal):
+            return float(obj)
+        raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
     def _emit(self, event_type: str, data: dict) -> str:
         """格式化 SSE 事件"""
-        return f"data: {json.dumps({'type': event_type, 'data': data}, ensure_ascii=False)}\n\n"
+        return f"data: {json.dumps({'type': event_type, 'data': data}, ensure_ascii=False, default=self._json_default)}\n\n"
 
     def _prev_node_id(self) -> Optional[str]:
         """获取最新非 discarded、非 branch、非 replaced 节点的 ID（用于连边）"""
@@ -656,7 +664,7 @@ class ReactLoop:
                 if "error" in result:
                     parts.append(f"错误: {result['error']}")
                 else:
-                    parts.append(json.dumps(result, ensure_ascii=False, indent=2))
+                    parts.append(json.dumps(result, ensure_ascii=False, indent=2, default=self._json_default))
             else:
                 parts.append(str(result))
 
@@ -842,7 +850,7 @@ class ReactLoop:
                         context_parts.append(
                             "\n## 图表数据\n"
                             "以下是 ECharts 图表配置，请在回答中用 ```echarts 代码块原样输出：\n"
-                            f"```echarts\n{json.dumps(echarts_opt, ensure_ascii=False)}\n```"
+                            f"```echarts\n{json.dumps(echarts_opt, ensure_ascii=False, default=self._json_default)}\n```"
                         )
 
         context = "\n\n".join(context_parts)
@@ -1036,8 +1044,8 @@ class ReactLoop:
         """ToolCall 完成事件：node+graph 之外，顶层带 tool_name/params/result_preview/result_full，
         前端左侧人读视图依赖这些顶层字段（retry 路径之前漏带，导致显示“无结果”）。"""
         if isinstance(result, dict):
-            result_preview = json.dumps(result, ensure_ascii=False)[:4000]
-            result_full = json.dumps(result, ensure_ascii=False)
+            result_preview = json.dumps(result, ensure_ascii=False, default=self._json_default)[:4000]
+            result_full = json.dumps(result, ensure_ascii=False, default=self._json_default)
         else:
             result_preview = str(result)[:4000]
             result_full = str(result)

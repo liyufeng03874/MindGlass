@@ -356,6 +356,7 @@ function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
     return { type: 'chatbi_table' as any, items: [{ title: `${total} 行`, url: '', snippet: tableHtml }] }
   }
   if (toolName === 'plot') {
+    console.log('[parsedToolResult] plot: inner keys:', Object.keys(inner), 'has echarts_option:', !!inner.echarts_option)
     if (inner.error) return { type: 'error', message: inner.error }
     const opt = inner.echarts_option
     if (opt) {
@@ -522,9 +523,37 @@ function getDecisionLabel(block: LeftBlock): string {
 
 // ── chatBI 内联图表初始化 ──
 const chartInstances = new Map<Element, echarts.ECharts>()
+const pendingCharts = new Map<Element, string>()  // el -> optionJson，等待容器有尺寸
+
 function initInlineChart(el: HTMLElement | null, optionJson: string | undefined) {
   if (!el || !optionJson) return
-  if (chartInstances.has(el)) return  // 已初始化
+  // 已有实例且容器有尺寸 → resize 即可
+  if (chartInstances.has(el)) {
+    if (el.clientWidth > 0 && el.clientHeight > 0) {
+      chartInstances.get(el)!.resize()
+    }
+    return
+  }
+  // 容器尺寸为 0 → 存起来，等可见时再 init
+  if (el.clientWidth === 0 || el.clientHeight === 0) {
+    pendingCharts.set(el, optionJson)
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          obs.disconnect()
+          pendingCharts.delete(el)
+          doInitChart(el, optionJson)
+        }
+      }
+    })
+    obs.observe(el)
+    return
+  }
+  doInitChart(el, optionJson)
+}
+
+function doInitChart(el: HTMLElement, optionJson: string) {
+  if (chartInstances.has(el)) return
   try {
     const opt = JSON.parse(optionJson)
     opt.backgroundColor = 'transparent'
