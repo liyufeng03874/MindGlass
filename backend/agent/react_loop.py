@@ -1066,6 +1066,7 @@ class ReactLoop:
         tool_names_in_steps = {s.get("tool", "") for s in steps}
         needs_serial = any(group.issubset(tool_names_in_steps) for group in _SERIAL_TOOL_GROUPS)
 
+
         parallel_group_id = f"pg_{uuid.uuid4().hex[:6]}"
         parallel_prev_id = self._prev_node_id()
         batch_start = time.time()
@@ -1085,22 +1086,28 @@ class ReactLoop:
                 tn = s.get("tool", "search")
                 tp = s.get("params", {})
                 # chatBI 链路数据传递：exec_sql 自动接收 gen_sql 的输出 SQL
-                if tn == "exec_sql" and not tp.get("sql"):
-                    # 从前面 gen_sql 的结果中取 SQL
-                    for prev_s, prev_ok, prev_res in results:
-                        if prev_s.get("tool") == "gen_sql" and prev_ok:
-                            sql_val = prev_res.get("result", {}).get("sql", "")
-                            if sql_val:
-                                tp["sql"] = sql_val
-                            break
+                # execute_tool 返回结构: {"tool": ..., "params": ..., "result": {...}}
+                if tn == "exec_sql":
+                    if not tp.get("sql"):
+                        for prev_s, prev_ok, prev_res in results:
+                            if prev_s.get("tool") == "gen_sql" and prev_ok:
+                                sql_val = prev_res.get("result", {}).get("sql", "")
+                                if sql_val:
+                                    tp["sql"] = sql_val
+                                break
+                    # exec_sql 只接受 sql 参数，清掉 Planner 可能带的多余字段（如 query）
+                    tp = {k: v for k, v in tp.items() if k in ("sql",)}
                 # plot 自动接收 exec_sql 的输出数据
-                if tn == "plot" and not tp.get("data"):
-                    for prev_s, prev_ok, prev_res in results:
-                        if prev_s.get("tool") == "exec_sql" and prev_ok:
-                            data_val = prev_res.get("result", {})
-                            if data_val and "columns" in data_val:
-                                tp["data"] = data_val
-                            break
+                if tn == "plot":
+                    if not tp.get("data"):
+                        for prev_s, prev_ok, prev_res in results:
+                            if prev_s.get("tool") == "exec_sql" and prev_ok:
+                                exec_result = prev_res.get("result", {})
+                                if exec_result and "columns" in exec_result:
+                                    tp["data"] = exec_result
+                                break
+                    # plot 只接受 data/type/title，清掉多余字段
+                    tp = {k: v for k, v in tp.items() if k in ("data", "type", "title")}
                 ok, res = await self._safe_tool_call(tn, tp)
                 results.append((s, ok, res))
         else:

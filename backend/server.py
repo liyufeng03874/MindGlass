@@ -294,32 +294,41 @@ def log_event(request: dict):
 
 @app.get("/api/list-demos")
 def list_demos():
-    """列出所有可用的 demo 文件，返回 [{name, label}] 供前端下拉框使用"""
+    """列出所有可用的测试用例，返回 [{name, label, source}] 供前端下拉框使用。
+    label 显示原始 query（不暴露文件名），source 区分 demo/static vs real run。"""
     import os
     import re
     docs_dir = os.path.join(os.path.dirname(__file__), "docs")
     demos = []
+
+    # 1. 静态 demo 文件：直接从文件内容读 meta.query 作 label
     for f in sorted(os.listdir(docs_dir)):
         if not f.endswith(".txt"):
             continue
-        # 从文件名提取可读标签：demo_1(3个百科问题).txt → "1 - 3个百科问题"
-        m = re.match(r'^demo_(\w+)\((.+)\)\.txt$', f)
-        if m:
-            label = f"{m.group(1)} - {m.group(2)}"
-        else:
-            label = f.replace('.txt', '')
-        demos.append({"name": f, "label": label})
+        label = ''
+        try:
+            with open(os.path.join(docs_dir, f), "r", encoding="utf-8") as fh:
+                snap = json.loads(fh.read().strip())
+            graph = snap.get("data", {}).get("graph", snap)
+            label = graph.get("meta", {}).get("query", "").strip()
+        except Exception:
+            pass
+        if not label:
+            # 文件里没有 query，用编号兜底，不暴露文件名
+            m = re.match(r'^demo_(\w+)', f)
+            label = f"测试用例 {m.group(1)}" if m else f.replace('.txt', '')
+        demos.append({"name": f, "label": label, "source": "demo"})
+
     return {"demos": demos}
 
 
 @app.post("/api/load-demo")
 def load_demo(demo: str = Query(default="1")):
-    """加载 demo 静态数据，支持数字编号（如 1、2、3）或完整文件名"""
+    """加载静态测试数据，支持数字编号或完整文件名"""
     import os
     import re
     docs_dir = os.path.join(os.path.dirname(__file__), "docs")
 
-    # 如果传入的是纯数字，匹配 demo_N(描述).txt 格式
     if re.match(r'^\d+$', demo):
         pattern = re.compile(rf'^demo_{re.escape(demo)}\(.*\)\.txt$')
         matched = [f for f in os.listdir(docs_dir) if pattern.match(f)]

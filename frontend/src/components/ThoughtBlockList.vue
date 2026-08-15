@@ -331,7 +331,8 @@ function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
   }
 
   // ── chatBI 工具结果解析 ──
-  const toolName = block.metadata?.params?.tool || obj.tool || ''
+  // 优先级：metadata.toolName(SSE直接带) > params.tool > obj.tool
+  const toolName = block.metadata?.toolName || block.metadata?.params?.tool || obj.tool || ''
   if (toolName === 'gen_sql') {
     const sql = inner.sql || ''
     if (inner.error) return { type: 'error', message: inner.error }
