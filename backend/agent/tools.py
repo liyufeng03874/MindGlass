@@ -1,6 +1,12 @@
-"""MindGlass Agent — 工具注册与执行"""
+"""MindGlass Agent — 工具注册与执行（统一工具注册表）
+
+chatBI 扩展：gen_sql / exec_sql / plot
+注册表字段：name / description / params / func / readonly / needs_confirm
+"""
 
 import httpx
+import json
+import hashlib
 from typing import Callable, Optional
 from dotenv import load_dotenv
 import os
@@ -11,18 +17,41 @@ load_dotenv()
 
 RAG_API_URL = os.getenv("RAG_API_URL", "http://localhost:8001")
 
+# chatBI 数据库连接（只读账号）
+CHATBI_DB_HOST = os.getenv("CHATBI_DB_HOST", "127.0.0.1")
+CHATBI_DB_PORT = int(os.getenv("CHATBI_DB_PORT", "3306"))
+CHATBI_DB_USER = os.getenv("CHATBI_DB_USER", "readonly")
+CHATBI_DB_PASS = os.getenv("CHATBI_DB_PASS", "")
+CHATBI_DB_NAME = os.getenv("CHATBI_DB_NAME", "analytics")
+
+# Redis 连接信息（复用思镜 Redis）
+REDIS_HOST = os.getenv("MINDGLASS_REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.getenv("MINDGLASS_REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("MINDGLASS_REDIS_DB", "0"))
+
 # 工具注册表
 _tools: dict[str, dict] = {}
 
 
-def register_tool(name: str, description: str, params: list[dict]):
-    """装饰器：注册工具"""
+def register_tool(name: str, description: str, params: list[dict],
+                  readonly: bool = True, needs_confirm: bool = False):
+    """装饰器：注册工具
+
+    Args:
+        name: 工具名
+        description: 工具描述（给 LLM planner 看）
+        params: 参数 schema 列表
+        readonly: 是否只读（True=安全无需确认）
+        needs_confirm: 是否需要人工确认后才执行
+    """
     def decorator(func: Callable):
         _tools[name] = {
             "name": name,
             "description": description,
             "params": params,
             "func": func,
+            "readonly": readonly,
+            "needs_confirm": needs_confirm,
         }
         return func
     return decorator
@@ -38,6 +67,8 @@ def list_tools() -> list[dict]:
             "name": t["name"],
             "description": t["description"],
             "params": t["params"],
+            "readonly": t.get("readonly", True),
+            "needs_confirm": t.get("needs_confirm", False),
         }
         for t in _tools.values()
     ]
@@ -137,6 +168,352 @@ async def tool_rag_retrieve(query: str, top_k: int = 5) -> dict:
             "passages": [],
             "count": 0,
         }
+
+
+# ============ chatBI 工具 ============
+
+@register_tool(
+    name="gen_sql",
+    description=(
+        "根据用户的自然语言数据分析问题，生成 SQL 查询语句。"
+        "只生成 SELECT 语句，不执行。需要配合 exec_sql 工具使用。"
+        "适用场景：用户问数据相关的问题（统计、趋势、排名、对比等）"
+    ),
+    params=[
+        {"name": "query", "type": "string", "description": "用户的自然语言数据分析问题"},
+        {"name": "schema_hint", "type": "string", "description": "可选的表结构提示", "default": ""},
+    ],
+    readonly=True,
+)
+async def tool_gen_sql(query: str, schema_hint: str = "") -> dict:
+    """
+    gen_sql: 调用 LLM 根据 schema 生成 SQL。
+    schema 优先从 Redis 缓存读取，miss 则查 information_schema。
+    生成的 SQL 只做 SELECT，不做任何写入操作。
+    """
+    from agent.llm import client, LLM_MODEL
+
+    # 1. 获取 schema（Redis 缓存 → 查库兜底）
+    schema_text = await _get_schema_cached()
+    if schema_hint:
+        schema_text = f"{schema_text}\n\n补充提示：{schema_hint}"
+
+    # 2. 调 LLM 生成 SQL
+    system_prompt = (
+        "你是一个 SQL 生成专家。根据用户问题和数据库 schema 生成 MySQL SELECT 语句。\n"
+        "规则：\n"
+        "1. 只生成 SELECT 语句，禁止 INSERT/UPDATE/DELETE/DROP/ALTER/CREATE\n"
+        "2. 使用标准 MySQL 语法\n"
+        "3. 如果问题无法用现有表回答，返回 {\"error\": \"原因\"}\n"
+        "4. 只返回纯 SQL，不要 markdown 围栏，不要解释\n"
+        "5. 涉及时间范围时注意字段的实际格式\n"
+        "6. 聚合查询必须有 GROUP BY\n"
+        "7. 大表查询加 LIMIT（默认 100）\n"
+    )
+    user_prompt = f"数据库 schema:\n{schema_text}\n\n用户问题: {query}\n\n请生成 SQL:"
+
+    try:
+        resp = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.1,
+            max_tokens=1024,
+        )
+        sql_text = resp.choices[0].message.content.strip()
+        # 清理 markdown 围栏
+        if sql_text.startswith("```"):
+            sql_text = sql_text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+        # 基础安全校验：禁止非 SELECT 语句
+        sql_upper = sql_text.upper().strip()
+        forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "EXEC"]
+        for kw in forbidden:
+            if sql_upper.startswith(kw) or f" {kw} " in sql_upper:
+                return {"error": f"SQL 安全检查失败：包含禁止关键字 {kw}", "sql": sql_text}
+
+        return {"sql": sql_text, "query": query}
+    except Exception as e:
+        return {"error": f"SQL 生成失败: {str(e)}", "query": query}
+
+
+@register_tool(
+    name="exec_sql",
+    description=(
+        "执行 gen_sql 生成的 SQL 查询并返回结构化结果。"
+        "使用只读数据库连接，有超时保护和结果行数限制。"
+        "输入必须是 gen_sql 输出的 SQL 字符串。"
+    ),
+    params=[
+        {"name": "sql", "type": "string", "description": "要执行的 SQL 查询语句"},
+    ],
+    readonly=True,
+)
+async def tool_exec_sql(sql: str) -> dict:
+    """
+    exec_sql: 校验 → 缓存查找 → 执行 → 返回结构化结果。
+    只读连接，禁止写入；超时 30s；结果上限 1000 行。
+    """
+    import time
+
+    # 1. 安全校验
+    sql_upper = sql.upper().strip()
+    if not sql_upper.startswith("SELECT") and not sql_upper.startswith("WITH"):
+        return {"error": "只允许 SELECT/WITH 查询", "sql": sql}
+
+    forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "EXEC", ";--"]
+    for kw in forbidden:
+        if f" {kw} " in sql_upper or sql_upper.endswith(kw):
+            return {"error": f"SQL 安全检查失败：包含禁止关键字 {kw}", "sql": sql}
+
+    # 2. 查 Redis 缓存
+    cache_key = f"mg:sql_result:{hashlib.md5(sql.encode()).hexdigest()}"
+    cached = await _redis_get(cache_key)
+    if cached:
+        try:
+            result = json.loads(cached)
+            result["_cache_hit"] = True
+            return result
+        except Exception:
+            pass
+
+    # 3. 执行 SQL
+    try:
+        import pymysql
+        conn = pymysql.connect(
+            host=CHATBI_DB_HOST,
+            port=CHATBI_DB_PORT,
+            user=CHATBI_DB_USER,
+            password=CHATBI_DB_PASS,
+            database=CHATBI_DB_NAME,
+            charset="utf8mb4",
+            read_timeout=30,
+            connect_timeout=10,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        start_time = time.time()
+        with conn.cursor() as cursor:
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+        elapsed_ms = round((time.time() - start_time) * 1000)
+        conn.close()
+
+        # 截断保护
+        total_rows = len(rows)
+        truncated = False
+        if total_rows > 1000:
+            rows = rows[:1000]
+            truncated = True
+
+        result = {
+            "columns": list(rows[0].keys()) if rows else [],
+            "rows": rows,
+            "row_count": total_rows,
+            "truncated": truncated,
+            "elapsed_ms": elapsed_ms,
+            "sql": sql,
+        }
+
+        # 4. 写入 Redis 缓存（TTL 30min）
+        await _redis_set(cache_key, json.dumps(result, ensure_ascii=False, default=str), ttl=1800)
+
+        return result
+    except ImportError:
+        return {"error": "pymysql 未安装，请 pip install pymysql", "sql": sql}
+    except Exception as e:
+        return {"error": f"SQL 执行失败: {str(e)}", "sql": sql}
+
+
+@register_tool(
+    name="plot",
+    description=(
+        "将 SQL 查询结果转换为 ECharts 图表配置。"
+        "输出标准 ECharts option JSON，前端直接渲染。"
+        "支持折线图(line)、柱状图(bar)、饼图(pie)、散点图(scatter)。"
+    ),
+    params=[
+        {"name": "data", "type": "object", "description": "exec_sql 返回的结构化数据（含 columns 和 rows）"},
+        {"name": "chart_type", "type": "string", "description": "图表类型: line/bar/pie/scatter/auto", "default": "auto"},
+        {"name": "title", "type": "string", "description": "图表标题", "default": ""},
+    ],
+    readonly=True,
+)
+async def tool_plot(data: dict, chart_type: str = "auto", title: str = "") -> dict:
+    """
+    plot: 将 SQL 结果转为 ECharts option。
+    auto 模式根据数据结构自动选择图表类型。
+    """
+    columns = data.get("columns", [])
+    rows = data.get("rows", [])
+
+    if not rows:
+        return {"error": "无数据可绘图", "echarts_option": None}
+
+    # 自动推断图表类型
+    if chart_type == "auto":
+        chart_type = _infer_chart_type(columns, rows)
+
+    # 生成 ECharts option
+    option = _build_echarts_option(columns, rows, chart_type, title)
+
+    return {
+        "echarts_option": option,
+        "chart_type": chart_type,
+        "title": title or option.get("title", {}).get("text", ""),
+        "row_count": len(rows),
+    }
+
+
+# ── chatBI 辅助函数 ──
+
+async def _get_schema_cached() -> str:
+    """从 Redis 缓存或 information_schema 获取数据库 schema"""
+    cache_key = f"mg:schema:{CHATBI_DB_NAME}"
+    cached = await _redis_get(cache_key)
+    if cached:
+        return cached
+
+    # 查 information_schema
+    try:
+        import pymysql
+        conn = pymysql.connect(
+            host=CHATBI_DB_HOST, port=CHATBI_DB_PORT,
+            user=CHATBI_DB_USER, password=CHATBI_DB_PASS,
+            database=CHATBI_DB_NAME, charset="utf8mb4",
+            connect_timeout=10,
+        )
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_COMMENT "
+                "FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_SCHEMA = %s ORDER BY TABLE_NAME, ORDINAL_POSITION",
+                (CHATBI_DB_NAME,)
+            )
+            rows = cursor.fetchall()
+        conn.close()
+
+        # 组装 schema 文本
+        tables: dict[str, list] = {}
+        for table, col, dtype, comment in rows:
+            tables.setdefault(table, []).append(f"  {col} ({dtype}){' -- ' + comment if comment else ''}")
+        schema_lines = []
+        for table, cols in tables.items():
+            schema_lines.append(f"表 {table}:")
+            schema_lines.extend(cols)
+        schema_text = "\n".join(schema_lines)
+
+        # 缓存 1h
+        await _redis_set(cache_key, schema_text, ttl=3600)
+        return schema_text
+    except Exception as e:
+        return f"(schema 获取失败: {str(e)}，请使用 schema_hint 参数提供表结构)"
+
+
+def _infer_chart_type(columns: list[str], rows: list[dict]) -> str:
+    """根据数据结构自动推断图表类型"""
+    if not rows or not columns:
+        return "bar"
+    n_cols = len(columns)
+    n_rows = len(rows)
+
+    # 两列：一维分类 + 一维数值 → pie（少量）或 bar
+    if n_cols == 2:
+        first_vals = [r.get(columns[0]) for r in rows[:20]]
+        is_numeric_second = all(isinstance(r.get(columns[1]), (int, float)) for r in rows[:20] if r.get(columns[1]) is not None)
+        if is_numeric_second and n_rows <= 10:
+            return "pie"
+        return "bar"
+
+    # 含日期/时间列 → line
+    date_keywords = ["date", "time", "month", "year", "day", "日期", "时间", "月", "年"]
+    for col in columns:
+        if any(kw in col.lower() for kw in date_keywords):
+            return "line"
+
+    # 默认柱状图
+    return "bar"
+
+
+def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str, title: str) -> dict:
+    """构建 ECharts option JSON"""
+    if not rows:
+        return {}
+
+    x_col = columns[0]  # 第一列作为 X 轴/分类
+    y_cols = [c for c in columns[1:] if isinstance(rows[0].get(c), (int, float))]
+    if not y_cols:
+        y_cols = columns[1:2]  # 兜底取第二列
+
+    x_data = [str(r.get(x_col, "")) for r in rows]
+
+    series = []
+    for yc in y_cols:
+        series.append({
+            "name": yc,
+            "type": chart_type,
+            "data": [r.get(yc, 0) for r in rows],
+        })
+
+    option = {
+        "title": {"text": title or f"{y_cols[0]} by {x_col}"},
+        "tooltip": {"trigger": "axis" if chart_type != "pie" else "item"},
+        "legend": {"data": y_cols} if len(y_cols) > 1 else {},
+        "series": series,
+    }
+
+    if chart_type != "pie":
+        option["xAxis"] = {"type": "category", "data": x_data}
+        option["yAxis"] = {"type": "value"}
+    else:
+        # pie 图用 name+value 格式
+        option["series"] = [{
+            "name": y_cols[0] if y_cols else "",
+            "type": "pie",
+            "data": [{"name": x_data[i], "value": rows[i].get(y_cols[0], 0)} for i in range(len(rows))],
+        }]
+        del option["xAxis"]
+        del option["yAxis"]
+
+    return option
+
+
+# ── Redis 辅助（轻量封装，不依赖 redis_cache.py 的主流程逻辑）──
+
+_redis_pool = None
+
+async def _get_redis():
+    """获取 Redis 连接（懒初始化）"""
+    global _redis_pool
+    if _redis_pool is None:
+        try:
+            import redis.asyncio as aioredis
+            _redis_pool = aioredis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+        except Exception:
+            return None
+    return _redis_pool
+
+async def _redis_get(key: str) -> Optional[str]:
+    """Redis GET，失败静默降级返回 None"""
+    try:
+        r = await _get_redis()
+        if r:
+            return await r.get(key)
+    except Exception:
+        pass
+    return None
+
+async def _redis_set(key: str, value: str, ttl: int = 3600) -> bool:
+    """Redis SET with TTL，失败静默降级返回 False"""
+    try:
+        r = await _get_redis()
+        if r:
+            await r.set(key, value, ex=ttl)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 # ============ 工具执行器 ============

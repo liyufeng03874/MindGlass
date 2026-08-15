@@ -43,7 +43,15 @@ def _make_node_id(step_index: int, node_type: str) -> str:
 TOOL_LABELS = {
     "search": "工具（网络搜索）",
     "rag_retrieve": "工具（RAG 检索）",
+    "gen_sql": "工具（生成SQL）",
+    "exec_sql": "工具（执行SQL）",
+    "plot": "工具（图表生成）",
 }
+
+# chatBI 串行工具组：这些工具在同一轮 steps 中出现时，必须按顺序执行而非并行
+_SERIAL_TOOL_GROUPS = [
+    {"gen_sql", "exec_sql"},  # gen_sql 必须在 exec_sql 之前
+]
 
 
 def _tool_label(tool_name: str) -> str:
@@ -1039,41 +1047,78 @@ class ReactLoop:
         if not steps:
             return
 
-        # 所有步骤并行执行
+        # 检测是否需要串行执行（chatBI: gen_sql → exec_sql）
+        tool_names_in_steps = {s.get("tool", "") for s in steps}
+        needs_serial = any(group.issubset(tool_names_in_steps) for group in _SERIAL_TOOL_GROUPS)
+
         parallel_group_id = f"pg_{uuid.uuid4().hex[:6]}"
         parallel_prev_id = self._prev_node_id()
-
-        if len(steps) > 1:
-            yield self._emit("status", {"message": f"🔧 并行执行 {len(steps)} 个工具调用..."})
-        else:
-            yield self._emit("status", {"message": f"🔧 正在执行: {steps[0].get('tool', 'search')}"})
-
         batch_start = time.time()
 
-        async def _exec(s):
-            tn = s.get("tool", "search")
-            tp = s.get("params", {})
-            ok, res = await self._safe_tool_call(tn, tp)
-            return s, ok, res
+        if needs_serial or len(steps) == 1:
+            # ── 串行执行模式（chatBI 或单步）──
+            if len(steps) > 1:
+                yield self._emit("status", {"message": f"🔧 串行执行 {len(steps)} 个工具调用..."})
+            else:
+                yield self._emit("status", {"message": f"🔧 正在执行: {steps[0].get('tool', 'search')}"})
 
-        tasks = [asyncio.create_task(_exec(s)) for s in steps]
-        # 轮询等待：打断信号到达时取消尚未完成的工具调用，不再干等
-        while True:
-            if self._is_interrupted():
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
-                break
-            if all(t.done() for t in tasks):
-                break
-            await asyncio.sleep(0.1)
+            results = []
+            for s in steps:
+                if self._is_interrupted():
+                    results.append((s, False, {"error": "工具执行被用户打断"}))
+                    continue
+                tn = s.get("tool", "search")
+                tp = s.get("params", {})
+                # chatBI 链路数据传递：exec_sql 自动接收 gen_sql 的输出 SQL
+                if tn == "exec_sql" and not tp.get("sql"):
+                    # 从前面 gen_sql 的结果中取 SQL
+                    for prev_s, prev_ok, prev_res in results:
+                        if prev_s.get("tool") == "gen_sql" and prev_ok:
+                            sql_val = prev_res.get("result", {}).get("sql", "")
+                            if sql_val:
+                                tp["sql"] = sql_val
+                            break
+                # plot 自动接收 exec_sql 的输出数据
+                if tn == "plot" and not tp.get("data"):
+                    for prev_s, prev_ok, prev_res in results:
+                        if prev_s.get("tool") == "exec_sql" and prev_ok:
+                            data_val = prev_res.get("result", {})
+                            if data_val and "columns" in data_val:
+                                tp["data"] = data_val
+                            break
+                ok, res = await self._safe_tool_call(tn, tp)
+                results.append((s, ok, res))
+        else:
+            # ── 并行执行模式（原有逻辑）──
+            if len(steps) > 1:
+                yield self._emit("status", {"message": f"🔧 并行执行 {len(steps)} 个工具调用..."})
+            else:
+                yield self._emit("status", {"message": f"🔧 正在执行: {steps[0].get('tool', 'search')}"})
 
-        results = []
-        for s, t in zip(steps, tasks):
-            try:
-                results.append(t.result())
-            except (asyncio.CancelledError, Exception):
-                results.append((s, False, {"error": "工具执行被用户打断"}))
+            async def _exec(s):
+                tn = s.get("tool", "search")
+                tp = s.get("params", {})
+                ok, res = await self._safe_tool_call(tn, tp)
+                return s, ok, res
+
+            tasks = [asyncio.create_task(_exec(s)) for s in steps]
+            # 轮询等待：打断信号到达时取消尚未完成的工具调用，不再干等
+            while True:
+                if self._is_interrupted():
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    break
+                if all(t.done() for t in tasks):
+                    break
+                await asyncio.sleep(0.1)
+
+            results = []
+            for s, t in zip(steps, tasks):
+                try:
+                    results.append(t.result())
+                except (asyncio.CancelledError, Exception):
+                    results.append((s, False, {"error": "工具执行被用户打断"}))
 
         # 按原始顺序创建节点
         for s, ok, res in results:

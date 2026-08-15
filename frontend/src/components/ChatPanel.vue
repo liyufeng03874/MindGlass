@@ -53,14 +53,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, onMounted } from 'vue'
 import MarkdownIt from 'markdown-it'
+import * as echarts from 'echarts'
 import type { Round, LeftBlock } from '../types/agent'
 import MirrorIcon from './MirrorIcon.vue'
 import ThoughtBlockList from './ThoughtBlockList.vue'
 import { usePhase, phaseColor } from '../composables/usePhase'
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
+
+// ── ECharts 自定义 fence 规则：```echarts 代码块 → 可渲染容器 ──
+const defaultFence = md.renderer.rules.fence ||
+  ((tokens: any[], idx: number, options: any, _env: any, self: any) => self.renderToken(tokens, idx, options))
+
+md.renderer.rules.fence = (tokens: any[], idx: number, options: any, env: any, self: any) => {
+  const token = tokens[idx]
+  const info = token.info?.trim()
+  if (info === 'echarts') {
+    const content = token.content.trim()
+    // 用 data-option 存原始 JSON，DOM 更新后由 initECharts 解析并渲染
+    return `<div class="echarts-wrapper" data-echarts-option="${encodeURIComponent(content)}" style="width:100%;height:350px;margin:8px 0;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);"></div>`
+  }
+  return defaultFence(tokens, idx, options, env, self)
+}
 
 // 让所有 Markdown 链接在新标签页打开，不抢走当前页面
 const defaultLinkRender = md.renderer.rules.link_open ||
@@ -93,6 +109,54 @@ const loading = computed(() => props.disabled)
 // 水镜：左侧跟随右侧相位呼吸
 const { phase } = usePhase()
 const phaseBorderColor = computed(() => phaseColor(phase.value))
+
+// ── ECharts 实例管理 ──
+const chartInstances: Map<Element, echarts.ECharts> = new Map()
+
+/** 扫描 DOM 中未初始化的 echarts-wrapper 并渲染图表 */
+function initECharts() {
+  nextTick(() => {
+    const wrappers = document.querySelectorAll('.echarts-wrapper:not([data-initialized])')
+    wrappers.forEach((el) => {
+      const encoded = el.getAttribute('data-echarts-option')
+      if (!encoded) return
+      try {
+        const option = JSON.parse(decodeURIComponent(encoded))
+        // 深色主题适配
+        option.backgroundColor = 'transparent'
+        if (option.title) {
+          option.title.textStyle = { ...option.title.textStyle, color: '#e0e0e0' }
+        }
+        if (option.tooltip) {
+          option.tooltip.backgroundColor = 'rgba(30,30,46,0.9)'
+          option.tooltip.textStyle = { color: '#cdd6f4' }
+        }
+        const chart = echarts.init(el as HTMLElement)
+        chart.setOption(option)
+        chartInstances.set(el, chart)
+        el.setAttribute('data-initialized', 'true')
+      } catch (e) {
+        console.error('[ChatPanel] ECharts init failed:', e)
+        ;(el as HTMLElement).innerHTML = '<span style="color:#f87171;font-size:12px;">图表渲染失败</span>'
+      }
+    })
+  })
+}
+
+// 轮次/回答变化时重新扫描并初始化图表
+watch(
+  () => props.rounds.map(r => r.answer?.length ?? 0),
+  () => initECharts(),
+  { deep: true }
+)
+
+onMounted(() => {
+  initECharts()
+  // 窗口 resize 时重排图表
+  window.addEventListener('resize', () => {
+    chartInstances.forEach(c => c.resize())
+  })
+})
 
 /** 最终回答已产生时，过滤掉本轮的 answer 流式 block（避免和回答气泡重复） */
 function visibleBlocks(round: Round): LeftBlock[] {
