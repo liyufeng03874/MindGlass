@@ -122,15 +122,8 @@ function initECharts() {
       if (!encoded) return
       try {
         const option = JSON.parse(decodeURIComponent(encoded))
-        // 深色主题适配
+        // 后端已生成深色主题 option，这里只做兑底
         option.backgroundColor = 'transparent'
-        if (option.title) {
-          option.title.textStyle = { ...option.title.textStyle, color: '#e0e0e0' }
-        }
-        if (option.tooltip) {
-          option.tooltip.backgroundColor = 'rgba(30,30,46,0.9)'
-          option.tooltip.textStyle = { color: '#cdd6f4' }
-        }
         const chart = echarts.init(el as HTMLElement)
         chart.setOption(option)
         chartInstances.set(el, chart)

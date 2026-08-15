@@ -347,7 +347,8 @@ watch(editingNode, (node) => {
         if (opt) {
           if (plotChartInstance) plotChartInstance.dispose()
           plotChartInstance = echarts.init(plotPreviewRef.value)
-          plotChartInstance.setOption({ ...opt, backgroundColor: 'transparent' })
+          opt.backgroundColor = 'transparent'
+          plotChartInstance.setOption(opt)
         } else {
           plotPreviewRef.value.innerHTML = '<span style="color:#f87171">无图表数据</span>'
         }

@@ -461,16 +461,61 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
             "data": [r.get(yc, 0) for r in rows],
         })
 
+    # ── 深色主题配色（与思镜 UI 统一）──
+    _TEXT_COLOR = "#fff"
+    _AXIS_LINE = "rgba(255,255,255,0.15)"
+    _SPLIT_LINE = "rgba(255,255,255,0.06)"
+    _PALETTE = ["#a78bfa", "#60a5fa", "#34d399", "#fbbf24", "#f87171", "#c084fc", "#38bdf8"]
+
     option = {
-        "title": {"text": title or f"{y_cols[0]} by {x_col}"},
-        "tooltip": {"trigger": "axis" if chart_type != "pie" else "item"},
-        "legend": {"data": y_cols} if len(y_cols) > 1 else {},
+        "backgroundColor": "transparent",
+        "color": _PALETTE,
+        "title": {
+            "text": title or f"{y_cols[0]} by {x_col}",
+            "textStyle": {"color": _TEXT_COLOR, "fontSize": 14, "fontWeight": 600},
+            "left": "center",
+        },
+        "tooltip": {
+            "trigger": "axis" if chart_type != "pie" else "item",
+            "backgroundColor": "rgba(30,30,46,0.85)",
+            "borderColor": "rgba(255,255,255,0.1)",
+            "textStyle": {"color": "#e0e0e0", "fontSize": 13},
+        },
+        "legend": {
+            "data": y_cols if len(y_cols) > 1 else [],
+            "top": 30,
+            "textStyle": {"color": _TEXT_COLOR, "fontSize": 12},
+        },
         "series": series,
     }
 
     if chart_type != "pie":
-        option["xAxis"] = {"type": "category", "data": x_data}
-        option["yAxis"] = {"type": "value"}
+        option["xAxis"] = {
+            "type": "category",
+            "data": x_data,
+            "axisLabel": {"color": _TEXT_COLOR, "fontSize": 11},
+            "axisLine": {"lineStyle": {"color": _AXIS_LINE}},
+            "axisTick": {"show": False},
+        }
+        option["yAxis"] = {
+            "type": "value",
+            "axisLabel": {"color": _TEXT_COLOR, "fontSize": 11},
+            "axisLine": {"show": False},
+            "splitLine": {"lineStyle": {"color": _SPLIT_LINE}},
+        }
+        # bar 图加圆角 + 渐变
+        if chart_type == "bar":
+            for s in option["series"]:
+                s["itemStyle"] = {
+                    "borderRadius": [4, 4, 0, 0],
+                    "color": {
+                        "type": "linear", "x": 0, "y": 0, "x2": 0, "y2": 1,
+                        "colorStops": [
+                            {"offset": 0, "color": _PALETTE[0]},
+                            {"offset": 1, "color": "rgba(167,139,250,0.3)"},
+                        ],
+                    },
+                }
     else:
         # pie 图用 name+value 格式
         option["series"] = [{
