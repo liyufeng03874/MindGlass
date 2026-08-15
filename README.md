@@ -15,6 +15,7 @@ MindGlass 是一个基于 ReAct 范式（Reason + Act）的多步推理 Agent �
 - **Redis 热缓存**：思维图增量缓存（RPUSH）+ 断联恢复（后端重启后前端自动重建图）+ 高频 query 语义复用（embedding 相似检索）
 - **双端适配**：PC 左右分栏 / 移动端上下分栏 + 底部 tab（Tailwind CSS 响应式）
 - **安全防线**：BERT 内容安全模型四层拦截（prompt 层 + Plan 校验 + Answer 流式校验 + 前端拦截）
+- **chatBI 数据分析**：自然语言 → SQL 生成 → 只读执行 → ECharts 图表（gen_sql / exec_sql / plot 三工具，多数据库支持，串行链路自动传参）
 - **前端主导**：Vue 3 + TypeScript + @vue-flow，完整的图可视化与交互体验
 
 ## 技术栈
@@ -25,7 +26,8 @@ MindGlass 是一个基于 ReAct 范式（Reason + Act）的多步推理 Agent �
 | Vue 3 + TypeScript | UI 框架 |
 | @vue-flow/core | 思维图渲染引擎 |
 | Tailwind CSS | 双端响应式适配（移动端上下分栏 + 底部 tab） |
-| markdown-it | Agent 回答 Markdown 渲染 |
+| markdown-it | Agent 回答 Markdown 渲染（含 ```echarts 代码块自定义渲染） |
+| ECharts | 图表渲染（深色主题，服务端生成 option） |
 | fetch + ReadableStream | SSE 流式接收（POST 请求体携带 history，避开 URL 长度限制） |
 
 ### 后端
@@ -36,6 +38,7 @@ MindGlass 是一个基于 ReAct 范式（Reason + Act）的多步推理 Agent �
 | OpenAI 兼容 API (deepseek-v4-flash) | LLM 规划/回答生成（2026-08 从 qwen3.6-plus 切换，TTFT 快 2-4 倍） |
 | Tavily Search API | 网络搜索工具 |
 | other-world RAG | 法律知识检索（仅法律案情类问题触发，docker 服务名互访） |
+| MySQL (pymysql, readonly) | chatBI 数据分析（employees + northwind 两库） |
 | BERT 安全模型 (ONNX Runtime) | 内容安全四层拦截 |
 
 ## 架构设计
@@ -59,6 +62,31 @@ User Response
 ```
 
 > 人工在环：运行中可在任意节点打断（截断点后置灰保留，可重试）；编辑节点参数重新执行；废弃分支置灰不删除（"边只标记不删除"）。
+
+### chatBI 数据分析链路（2026-08-16）
+
+> 让思镜不只是搜文档，还能查库、算数、画图——面向数据库的结构化数据分析能力。
+
+```
+用户问题（各部门平均薪资排名）
+    ↓
+[Plan] ── 关键词触发：统计/趋势/排名/占比 + 业务指标 → gen_sql + exec_sql + plot
+    ↓（串行执行 _SERIAL_TOOL_GROUPS）
+[gen_sql] ── 自然语言 → SQL（LLM 生成 + 安全校验，拒绝非 SELECT）
+    ↓ 自动传 SQL
+[exec_sql] ── 只读执行（readonly 账号 + Redis 结果缓存 TTL 30min）
+    ↓ 自动传数据
+[plot] ── 查询结果 → ECharts option（服务端生成深色主题）
+    ↓
+[Answer] ── 回答 + ```echarts 代码块渲染图表
+```
+
+- **多数据库**：`CHATBI_DATABASES` 环境变量（comma 分隔）；已接入 **employees**（员工/薪资/职称/部门，30 万+ 员工）+ **northwind**（订单/产品/客户，电商）；跨库 JOIN 用 `database=None`
+- **串行执行**：gen_sql → exec_sql → plot 必须按序，react_loop `_SERIAL_TOOL_GROUPS` 控制，数据链自动传递（exec_sql 自动收 SQL，plot 自动收数据）
+- **缓存**：schema 缓存 `mg:schema:{db}`（TTL 1h）、SQL 结果缓存 `mg:sql_result:{hash}`（TTL 30min），Redis 不可用静默降级
+- **安全**：exec_sql 只读（SELECT 白名单校验）、readonly 数据库账号、观察层只看结果不评 SQL 语句
+- **前端差异化**：gen_sql 可编辑 SQL 文本框 / exec_sql 只读 SQL + 结果表格（前 20 行）/ plot ECharts 预览 / 左侧聊天流内联渲染图表
+- **序列化兜底**：pymysql 返回 Decimal（如 AVG()），SSE 发送统一 `_json_default`（Decimal→float）防连接崩断
 
 ### Redis 热缓存层（2026-08-10）
 
@@ -97,7 +125,7 @@ run 收尾               后台线程登记 query 向量 → mg:query:index（�
 | 节点 | 颜色 | 说明 |
 |------|------|------|
 | 🧠 Plan | 蓝 | LLM 规划步骤，输出 JSON 格式的步骤列表 |
-| 🔧 ToolCall | 绿 | 工具执行节点（search / rag_retrieve） |
+| 🔧 ToolCall | 绿 | 工具执行节点（search / rag_retrieve / gen_sql / exec_sql / plot） |
 | 📡 Observe | 橙 | 观察结果收集（可合并多个 ToolCall 结果） |
 | 💬 Answer | 紫 | 最终回答生成 |
 
@@ -147,6 +175,8 @@ npm run dev
 | `MODEL` | 模型名称 | `deepseek-v4-flash` |
 | `TAVILY_API_KEY` | Tavily 搜索 API Key | `tvly-xxxxx` |
 | `RAG_API_URL` | RAG 服务地址 | `http://localhost:5000`（本地）/ `http://otherworld-backend:8000`（Docker） |
+| `CHATBI_DB_HOST/PORT/USER/PASS/NAME` | chatBI MySQL 连接（readonly 账号） | `127.0.0.1` / `3306` / `readonly` / `...` / `employees` |
+| `CHATBI_DATABASES` | chatBI 可用数据库列表（逗号分隔） | `employees,northwind` |
 | `BERT_SAFETY_MODEL` | BERT 安全模型路径 | `/app/models/bert-safety` |
 | `MINDGLASS_PORT` | 后端端口 | `8001` |
 | `MINDGLASS_REDIS_HOST/PORT/DB` | Redis 地址 | `127.0.0.1` / `6379` / `0` |
@@ -164,7 +194,8 @@ npm run dev
 | POST | `/api/retry` | 从指定 step 重试（SSE） |
 | POST | `/api/retry_from_graph` | 并行重试方案 C（SSE） |
 | POST | `/api/interrupt` | 运行中打断（截断点后置灰保留） |
-| POST | `/api/load-demo` | 加载测试数据（开发用） |
+| GET | `/api/list-demos` | chatBI 演示用例列表（标签从文件 meta.query 提取，不暴露文件名） |
+| POST | `/api/load-demo` | 加载演示用例（只读静态文件） |
 | GET | `/api/admin/runs` | admin 运行记录（含 conversation_id 会话分组） |
 | GET | `/api/admin/runs/{run_id}` | 单条运行快照（思维重现） |
 | GET | `/api/admin/overview` | 总览指标（完答率/降级率/平均耗时） |
@@ -178,6 +209,10 @@ npm run dev
 | 综合类 | 帮我查三篇论文的共同点 | 完整 Plan → ToolCall → Observe → Answer |
 | 游戏类 | 星辰变大后期哪个职业最强？ | 本地知识库检索 |
 | 搜索类 | 2025年华为前端开发最新技术趋势 | Tavily 网络搜索 |
+| chatBI 基础 | 各部门平均薪资排名 | gen_sql → exec_sql → plot 柱状图 |
+| chatBI 进阶 | 入职超过 20 年的员工最多的部门 | 多表 JOIN + 统计 |
+| chatBI 高阶 | 每个部门薪资最高的员工是谁 | 窗口函数 RANK() 排名 |
+| chatBI 电商 | northwind 各产品类别销量 TOP5 | 跨库查询 + 饼图/柱状图 |
 
 ## 项目结构
 
@@ -186,10 +221,10 @@ MindGlass/
 ├── backend/
 │   ├── server.py              # FastAPI 入口
 │   ├── agent/
-│   │   ├── react_loop.py      # ReAct 循环主类
-│   │   ├── planner.py         # LLM 任务规划
-│   │   ├── answerer.py        # LLM 回答生成
-│   │   ├── tools.py           # 工具注册与执行
+│   │   ├── react_loop.py      # ReAct 循环主类（含 _SERIAL_TOOL_GROUPS 串行执行）
+│   │   ├── planner.py         # LLM 任务规划（含 chatBI 工具触发规则）
+│   │   ├── answerer.py        # LLM 回答生成（含 ```echarts 输出规则）
+│   │   ├── tools.py           # 工具注册与执行（search/rag_retrieve/gen_sql/exec_sql/plot）
 │   │   └── llm.py             # LLM 调用封装
 │   ├── state/
 │   │   ├── models.py          # 数据模型（Node/Edge/Branch）
@@ -202,9 +237,9 @@ MindGlass/
 │   ├── src/
 │   │   ├── App.vue            # 主应用（PC 左右分栏 / 移动端上下分栏）
 │   │   ├── components/
-│   │   │   ├── ChatPanel.vue      # 对话面板（按轮次渲染）
-│   │   │   ├── ThoughtBlockList.vue # 思考直播 block 渲染（人读视图）
-│   │   │   ├── ReasoningGraph.vue # 思维图 + 节点编辑 + 打断
+│   │   │   ├── ChatPanel.vue      # 对话面板（按轮次渲染，含 ```echarts 图表渲染）
+│   │   │   ├── ThoughtBlockList.vue # 思考直播 block 渲染（SQL 代码块/结果表格/内联图表）
+│   │   │   ├── ReasoningGraph.vue # 思维图 + 节点编辑 + 打断（chatBI 差异化工具弹窗）
 │   │   │   └── NodeDetail.vue     # 节点详情面板
 │   │   ├── views/
 │   │   │   ├── HomeView.vue       # 首页（对话 + 思维图）
@@ -237,6 +272,7 @@ MindGlass/
 - ✅ Phase 4：决策回环 v2 重构 + 打断/重试大修（边只标记不删除）
 - ✅ Phase 5：BERT 安全防线 + 移动端适配 + 多轮对话 + 会话关联（2026-08）
 - ✅ Phase 6：Redis 热缓存层——断联恢复 + 高频 query 语义复用（2026-08-10，本地验收通过）
+- ✅ Phase 7：chatBI 数据分析能力——gen_sql/exec_sql/plot 三工具 + ECharts 可视化（2026-08-16，分支 feature/chatbi）
 - ✅ 已上线：mindglass.stelladream.cn（Docker Compose + Nginx）
 
 ## License
