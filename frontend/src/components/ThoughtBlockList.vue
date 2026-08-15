@@ -1031,6 +1031,10 @@ function doInitChart(el: HTMLElement, optionJson: string) {
   max-height: 120px;
   overflow-y: auto;
 }
+.sql-preview::-webkit-scrollbar { width: 5px; height: 5px; }
+.sql-preview::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 3px; }
+.sql-preview::-webkit-scrollbar-thumb { background: rgba(167,139,250,0.3); border-radius: 3px; }
+.sql-preview::-webkit-scrollbar-thumb:hover { background: rgba(167,139,250,0.5); }
 
 .chatbi-table-wrap :deep(table) {
   width: 100%;
