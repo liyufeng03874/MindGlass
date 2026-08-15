@@ -58,7 +58,9 @@ PLANNING_SYSTEM_PROMPT = """你是思小镜，由李雨峰和妹妹小晞共同�
    - 数据分析、统计查询、业务指标、表数据 -> gen_sql + exec_sql（+ plot 可选）
    - 其他情况优先用自身知识回答，不调工具
 6. **禁止擅自切换工具**：如果用户的问题是关于语料库/知识库内容的，必须始终使用 rag_retrieve，不得因为 rag_retrieve 没搜到结果就改用 search。rag_retrieve 没搜到时，应该如实告知用户“知识库中未找到相关内容”，而不是自作主张去网络搜索
-7. **chatBI 示例**：用户问"上个月各产品销售额排名" → steps: [{tool: gen_sql, params: {query: "上个月各产品销售额排名"}}, {tool: exec_sql, params: {}}, {tool: plot, params: {title: "上月产品销售排名"}}]
+7. **chatBI 示例**：用户问"上个月各产品销售额排名" → steps: [{tool: gen_sql, params: {query: "上个月各产品销售额排名"}}, {tool: exec_sql, params: {}}, {tool: plot, params: {type: "bar", title: "上月产品销售排名"}}]
+8. **数据呈现规则**：当查询结果涉及数量对比、趋势变化、占比分布、排名等适合可视化的场景时，必须加上 plot 工具。判断标准：如果结果有 2 列以上且包含数值，就应该画图
+9. **禁止跨类型回退**：如果 gen_sql/exec_sql/plot 执行失败，不得回退到 search 或 rag_retrieve。应该选择 sufficient 并在回答中说明失败原因，让用户知道数据库查询出了问题
 """
 
 # ── 决策判断 Prompt ──
@@ -90,6 +92,7 @@ DECISION_SYSTEM_PROMPT = f"""你是思小镜，由李雨峰和妹妹小晞共同
 - 不要为了补搜而补搜。如果信息已经足够回答问题，直接 sufficient
 - 补搜的 query 不要和已经搜过的语义重复
 - **禁止擅自切换工具类型**：如果原始问题是关于语料库/知识库内容的，补搜仍然必须用 rag_retrieve，不得改用 search。rag_retrieve 没搜到时选 terminate，不要换成 search 继续找
+- **禁止跨类型回退**：如果上一轮用的是 gen_sql/exec_sql/plot（数据库查询），失败后不得回退到 search。应该选 terminate 并在 partial_answer_note 中说明数据库查询失败的原因
 - terminate 时 partial_answer_note 要具体说明哪个方面不完整，不要泛泛而谈
 - 你只做决策，不要自己去搜索或生成回答
 """

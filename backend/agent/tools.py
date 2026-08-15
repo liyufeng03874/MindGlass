@@ -338,12 +338,13 @@ async def tool_exec_sql(sql: str) -> dict:
     ),
     params=[
         {"name": "data", "type": "object", "description": "exec_sql 返回的结构化数据（含 columns 和 rows）"},
-        {"name": "chart_type", "type": "string", "description": "图表类型: line/bar/pie/scatter/auto", "default": "auto"},
+        {"name": "type", "type": "string", "description": "图表类型: line/bar/pie/scatter/auto", "default": "auto"},
         {"name": "title", "type": "string", "description": "图表标题", "default": ""},
     ],
     readonly=True,
 )
-async def tool_plot(data: dict, chart_type: str = "auto", title: str = "") -> dict:
+async def tool_plot(data: dict, type: str = "auto", title: str = "") -> dict:
+    chart_type = type  # 兼容 LLM 输出的 type 参数
     """
     plot: 将 SQL 结果转为 ECharts option。
     auto 模式根据数据结构自动选择图表类型。
