@@ -24,6 +24,9 @@ CHATBI_DB_USER = os.getenv("CHATBI_DB_USER", "readonly")
 CHATBI_DB_PASS = os.getenv("CHATBI_DB_PASS", "")
 CHATBI_DB_NAME = os.getenv("CHATBI_DB_NAME", "analytics")
 
+# chatBI 可用数据库列表（支持多库，逗号分隔）
+CHATBI_DATABASES = [db.strip() for db in os.getenv("CHATBI_DATABASES", CHATBI_DB_NAME).split(",")]
+
 # Redis 连接信息（复用思镜 Redis）
 REDIS_HOST = os.getenv("MINDGLASS_REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.getenv("MINDGLASS_REDIS_PORT", "6379"))
@@ -369,46 +372,48 @@ async def tool_plot(data: dict, chart_type: str = "auto", title: str = "") -> di
 # ── chatBI 辅助函数 ──
 
 async def _get_schema_cached() -> str:
-    """从 Redis 缓存或 information_schema 获取数据库 schema"""
-    cache_key = f"mg:schema:{CHATBI_DB_NAME}"
-    cached = await _redis_get(cache_key)
-    if cached:
-        return cached
+    """从 Redis 缓存或 information_schema 获取所有可用数据库的 schema"""
+    all_schemas = []
+    for db_name in CHATBI_DATABASES:
+        cache_key = f"mg:schema:{db_name}"
+        cached = await _redis_get(cache_key)
+        if cached:
+            all_schemas.append(f"=== 数据库: {db_name} ===\n{cached}")
+            continue
 
-    # 查 information_schema
-    try:
-        import pymysql
-        conn = pymysql.connect(
-            host=CHATBI_DB_HOST, port=CHATBI_DB_PORT,
-            user=CHATBI_DB_USER, password=CHATBI_DB_PASS,
-            database=CHATBI_DB_NAME, charset="utf8mb4",
-            connect_timeout=10,
-        )
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_COMMENT "
-                "FROM INFORMATION_SCHEMA.COLUMNS "
-                "WHERE TABLE_SCHEMA = %s ORDER BY TABLE_NAME, ORDINAL_POSITION",
-                (CHATBI_DB_NAME,)
+        try:
+            import pymysql
+            conn = pymysql.connect(
+                host=CHATBI_DB_HOST, port=CHATBI_DB_PORT,
+                user=CHATBI_DB_USER, password=CHATBI_DB_PASS,
+                database=db_name, charset="utf8mb4",
+                connect_timeout=10,
             )
-            rows = cursor.fetchall()
-        conn.close()
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_COMMENT "
+                    "FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = %s ORDER BY TABLE_NAME, ORDINAL_POSITION",
+                    (db_name,)
+                )
+                rows = cursor.fetchall()
+            conn.close()
 
-        # 组装 schema 文本
-        tables: dict[str, list] = {}
-        for table, col, dtype, comment in rows:
-            tables.setdefault(table, []).append(f"  {col} ({dtype}){' -- ' + comment if comment else ''}")
-        schema_lines = []
-        for table, cols in tables.items():
-            schema_lines.append(f"表 {table}:")
-            schema_lines.extend(cols)
-        schema_text = "\n".join(schema_lines)
+            tables: dict[str, list] = {}
+            for table, col, dtype, comment in rows:
+                tables.setdefault(table, []).append(f"  {col} ({dtype}){' -- ' + comment if comment else ''}")
+            schema_lines = []
+            for table, cols in tables.items():
+                schema_lines.append(f"表 {table}:")
+                schema_lines.extend(cols)
+            schema_text = "\n".join(schema_lines)
 
-        # 缓存 1h
-        await _redis_set(cache_key, schema_text, ttl=3600)
-        return schema_text
-    except Exception as e:
-        return f"(schema 获取失败: {str(e)}，请使用 schema_hint 参数提供表结构)"
+            await _redis_set(cache_key, schema_text, ttl=3600)
+            all_schemas.append(f"=== 数据库: {db_name} ===\n{schema_text}")
+        except Exception as e:
+            all_schemas.append(f"=== 数据库: {db_name} ===\n(schema 获取失败: {str(e)})")
+
+    return "\n\n".join(all_schemas)
 
 
 def _infer_chart_type(columns: list[str], rows: list[dict]) -> str:

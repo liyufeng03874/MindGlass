@@ -830,6 +830,21 @@ class ReactLoop:
             if reasoning:
                 context_parts.append(f"\n## 决策说明\n{reasoning}")
 
+        # ── chatBI: 注入 plot 工具的 echarts_option 到 Answer 上下文 ──
+        for node in self.store.nodes:
+            if (node.type == "ToolCall" and node.status == "done"
+                    and node.data.get("tool") == "plot"):
+                plot_result = node.data.get("result", {})
+                if isinstance(plot_result, dict):
+                    inner = plot_result.get("result", plot_result)  # execute_tool 包了一层
+                    echarts_opt = inner.get("echarts_option")
+                    if echarts_opt:
+                        context_parts.append(
+                            "\n## 图表数据\n"
+                            "以下是 ECharts 图表配置，请在回答中用 ```echarts 代码块原样输出：\n"
+                            f"```echarts\n{json.dumps(echarts_opt, ensure_ascii=False)}\n```"
+                        )
+
         context = "\n\n".join(context_parts)
         history_text = ""
         if self.history:

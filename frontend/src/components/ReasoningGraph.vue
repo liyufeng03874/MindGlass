@@ -38,25 +38,66 @@
           <div v-if="isDeprecatedNode" class="deprecated-hint-panel">
             ⚠️ 此工具调用已被废弃（被重试截断），仅保留供对比参考。
           </div>
-          <label>工具选择</label>
-          <select v-model="editForm.tool" class="select-field">
-            <option value="search">🔍 搜索 (search)</option>
-            <option value="rag_retrieve">📖 RAG 检索 (rag_retrieve)</option>
-          </select>
 
-          <label>查询内容</label>
-          <input
-            v-model="editForm.queryInput"
-            class="input-field"
-            placeholder="输入你想查询的内容..."
-          />
+          <!-- 只有 search/rag_retrieve 展示工具切换 + 查询输入 -->
+          <template v-if="isSearchableTool">
+            <label>工具选择</label>
+            <select v-model="editForm.tool" class="select-field">
+              <option value="search">🔍 搜索 (search)</option>
+              <option value="rag_retrieve">📖 RAG 检索 (rag_retrieve)</option>
+            </select>
 
-          <!-- 输出结果（只展示 answer） -->
-          <div v-if="toolCallResult" class="output-preview">
+            <label>查询内容</label>
+            <input
+              v-model="editForm.queryInput"
+              class="input-field"
+              placeholder="输入你想查询的内容..."
+            />
+          </template>
+
+          <!-- gen_sql: 可编辑 SQL -->
+          <template v-else-if="currentToolName === 'gen_sql'">
+            <label>🛠️ 生成 SQL</label>
+            <textarea
+              v-model="editForm.sqlInput"
+              class="input-field sql-textarea"
+              rows="4"
+              placeholder="SELECT ..."
+            ></textarea>
+          </template>
+
+          <!-- exec_sql: 只读展示 SQL + 结果 -->
+          <template v-else-if="currentToolName === 'exec_sql'">
+            <label>⚙️ 执行 SQL（只读）</label>
+            <pre class="sql-readonly">{{ editingNode.data?.params?.sql || '(无)' }}</pre>
+            <div v-if="execSqlPreview" class="output-preview">
+              <label>📊 查询结果（前 {{ execSqlPreview.row_count }} 行）</label>
+              <div class="answer-content" v-html="execSqlPreviewHtml"></div>
+            </div>
+          </template>
+
+          <!-- plot: 展示图表预览 -->
+          <template v-else-if="currentToolName === 'plot'">
+            <label>📈 图表生成</label>
+            <div ref="plotPreviewRef" class="plot-preview-container"></div>
+          </template>
+
+          <!-- 其他未知工具：兜底展示 -->
+          <template v-else>
+            <label>工具: {{ currentToolName }}</label>
+            <div v-if="toolCallResult" class="output-preview">
+              <label>📤 输出结果</label>
+              <div class="answer-content" v-html="md.render(toolCallResult)"></div>
+            </div>
+            <p v-else class="readonly-hint">暂无输出结果</p>
+          </template>
+
+          <!-- 通用输出结果（search/rag_retrieve 用） -->
+          <div v-if="isSearchableTool && toolCallResult" class="output-preview">
             <label>📤 输出结果</label>
             <div class="answer-content" v-html="md.render(toolCallResult)"></div>
           </div>
-          <p v-else class="readonly-hint">暂无输出结果</p>
+          <p v-else-if="isSearchableTool && !toolCallResult" class="readonly-hint">暂无输出结果</p>
         </template>
 
         <!-- Plan 只读展示，不提供干预：要改规划不如重新输一个新 query -->
@@ -173,7 +214,7 @@
 
 <script setup lang="ts">
 import { VueFlow, useVueFlow } from '@vue-flow/core'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import MarkdownIt from 'markdown-it'
 import MirrorIcon from './MirrorIcon.vue'
 import { useReasoningGraph } from '@/composables/useReasoningGraph'
@@ -264,6 +305,56 @@ const toolCallResult = computed(() => {
 
   return parts.join('\n\n---\n\n')
 })
+
+// ── chatBI 工具弹窗辅助 ──
+const currentToolName = computed(() => editingNode.value?.data?.tool || '')
+const isSearchableTool = computed(() => ['search', 'rag_retrieve'].includes(currentToolName.value))
+
+const execSqlPreview = computed(() => {
+  if (currentToolName.value !== 'exec_sql') return null
+  const r = editingNode.value?.data?.result?.result || editingNode.value?.data?.result
+  if (!r || !r.columns) return null
+  return { columns: r.columns, rows: (r.rows || []).slice(0, 20), row_count: r.row_count ?? r.rows?.length ?? 0 }
+})
+
+const execSqlPreviewHtml = computed(() => {
+  const p = execSqlPreview.value
+  if (!p || !p.rows.length) return '<em>无数据</em>'
+  let html = '<table><thead><tr>'
+  p.columns.forEach((c: string) => { html += `<th>${c}</th>` })
+  html += '</tr></thead><tbody>'
+  p.rows.forEach((row: any) => {
+    html += '<tr>'
+    p.columns.forEach((c: string) => { html += `<td>${row[c] ?? ''}</td>` })
+    html += '</tr>'
+  })
+  html += '</tbody></table>'
+  if (p.row_count > 20) html += `<p style="color:#888;font-size:12px;">显示前 20 / 共 ${p.row_count} 行</p>`
+  return html
+})
+
+// plot 图表预览（节点打开时初始化）
+import * as echarts from 'echarts'
+const plotPreviewRef = ref<HTMLElement | null>(null)
+let plotChartInstance: echarts.ECharts | null = null
+
+watch(editingNode, (node) => {
+  if (node?.data?.tool === 'plot') {
+    nextTick(() => {
+      if (plotPreviewRef.value) {
+        const r = node.data?.result?.result || node.data?.result
+        const opt = r?.echarts_option
+        if (opt) {
+          if (plotChartInstance) plotChartInstance.dispose()
+          plotChartInstance = echarts.init(plotPreviewRef.value)
+          plotChartInstance.setOption({ ...opt, backgroundColor: 'transparent' })
+        } else {
+          plotPreviewRef.value.innerHTML = '<span style="color:#f87171">无图表数据</span>'
+        }
+      }
+    })
+  }
+}, { immediate: true })
 
 /** v2: 渲染结构化 Observe 评估输出 */
 function buildStructuredObserve(obs: any): string {
@@ -1194,6 +1285,38 @@ label {
   .answer-content {
     font-size: 14px;
   }
+}
+
+/* chatBI 工具弹窗样式 */
+.sql-textarea {
+  font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.sql-readonly {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-h);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 4px 0;
+}
+
+.plot-preview-container {
+  width: 100%;
+  height: 280px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  margin-top: 4px;
 }
 </style>
 

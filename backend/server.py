@@ -12,6 +12,7 @@ load_dotenv()
 from state.store import ReasoningGraphStore
 from state.models import ReasoningNode, ReasoningEdge
 from agent.react_loop import ReactLoop
+from agent.tools import list_tools
 
 # Admin 持久化层
 from admin.persistence import init_db as admin_init_db, save_run as admin_save_run
