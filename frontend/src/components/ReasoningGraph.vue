@@ -480,7 +480,10 @@ const planDecisionLabel = computed(() => {
 
 /** 工具中文名（与后端 TOOL_LABELS 保持一致） */
 function toolLabel(tool: string): string {
-  const map: Record<string, string> = { search: '网络搜索', rag_retrieve: 'RAG 检索' }
+  const map: Record<string, string> = {
+    search: '网络搜索', rag_retrieve: 'RAG 检索',
+    gen_sql: '生成SQL', exec_sql: '执行SQL', plot: '图表生成',
+  }
   return map[tool] || tool
 }
 
@@ -525,9 +528,11 @@ function onNodeClick({ node }: { node: { id: string } }) {
 
   // 初始化表单
   if (target.type === 'ToolCall') {
+    const toolName = target.data.tool || ''
     editForm.value = {
-      tool: target.data.tool || '',
+      tool: toolName,
       queryInput: target.data.params?.query || '',
+      sqlInput: target.data.params?.sql || target.data.result?.result?.sql || target.data.result?.sql || '',
     }
   } else if (target.type === 'Plan') {
     editForm.value = {

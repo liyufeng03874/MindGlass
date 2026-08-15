@@ -127,6 +127,15 @@
             <template v-else-if="parsedToolResult(blockGroup.single)?.type === 'error'">
               <div class="tool-error-msg">⚠️ {{ parsedToolResult(blockGroup.single)?.message || '工具返回错误' }}</div>
             </template>
+            <template v-else-if="(parsedToolResult(blockGroup.single)?.type as string) === 'chatbi_sql'">
+              <pre class="sql-preview">{{ parsedToolResult(blockGroup.single)?.items?.[0]?.snippet }}</pre>
+            </template>
+            <template v-else-if="(parsedToolResult(blockGroup.single)?.type as string) === 'chatbi_table'">
+              <div class="chatbi-table-wrap" v-html="parsedToolResult(blockGroup.single)?.items?.[0]?.snippet"></div>
+            </template>
+            <template v-else-if="(parsedToolResult(blockGroup.single)?.type as string) === 'chatbi_chart'">
+              <div :ref="(el: any) => initInlineChart(el, parsedToolResult(blockGroup.single)?.items?.[0]?.snippet)" class="inline-chart-container"></div>
+            </template>
             <template v-else>
               <span class="placeholder">无结果</span>
             </template>
@@ -197,6 +206,15 @@
               <template v-else-if="parsedToolResult(block)?.type === 'error'">
                 <div class="tool-error-msg">⚠️ {{ parsedToolResult(block)?.message || '工具返回错误' }}</div>
               </template>
+              <template v-else-if="(parsedToolResult(block)?.type as string) === 'chatbi_sql'">
+                <pre class="sql-preview">{{ parsedToolResult(block)?.items?.[0]?.snippet }}</pre>
+              </template>
+              <template v-else-if="(parsedToolResult(block)?.type as string) === 'chatbi_table'">
+                <div class="chatbi-table-wrap" v-html="parsedToolResult(block)?.items?.[0]?.snippet"></div>
+              </template>
+              <template v-else-if="(parsedToolResult(block)?.type as string) === 'chatbi_chart'">
+                <div :ref="(el: any) => initInlineChart(el, parsedToolResult(block)?.items?.[0]?.snippet)" class="inline-chart-container"></div>
+              </template>
               <template v-else>
                 <span class="placeholder">无结果</span>
               </template>
@@ -218,7 +236,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
+import * as echarts from 'echarts'
 import MarkdownIt from 'markdown-it'
 import type { LeftBlock } from '../types/agent'
 
@@ -311,6 +330,39 @@ function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
     return { type: 'error', message: inner.error || obj.error }
   }
 
+  // ── chatBI 工具结果解析 ──
+  const toolName = block.metadata?.params?.tool || obj.tool || ''
+  if (toolName === 'gen_sql') {
+    const sql = inner.sql || ''
+    if (inner.error) return { type: 'error', message: inner.error }
+    return { type: 'chatbi_sql' as any, items: [{ title: 'SQL', url: '', snippet: sql }] }
+  }
+  if (toolName === 'exec_sql') {
+    if (inner.error) return { type: 'error', message: inner.error }
+    const cols = inner.columns || []
+    const rows = (inner.rows || []).slice(0, 10)
+    let tableHtml = '<table class="chatbi-table"><thead><tr>'
+    cols.forEach((c: string) => { tableHtml += `<th>${c}</th>` })
+    tableHtml += '</tr></thead><tbody>'
+    rows.forEach((r: any) => {
+      tableHtml += '<tr>'
+      cols.forEach((c: string) => { tableHtml += `<td>${r[c] ?? ''}</td>` })
+      tableHtml += '</tr>'
+    })
+    tableHtml += '</tbody></table>'
+    const total = inner.row_count ?? rows.length
+    if (total > 10) tableHtml += `<p style="color:#888;font-size:11px;">显示前 10 / 共 ${total} 行</p>`
+    return { type: 'chatbi_table' as any, items: [{ title: `${total} 行`, url: '', snippet: tableHtml }] }
+  }
+  if (toolName === 'plot') {
+    if (inner.error) return { type: 'error', message: inner.error }
+    const opt = inner.echarts_option
+    if (opt) {
+      return { type: 'chatbi_chart' as any, items: [{ title: inner.chart_type || 'chart', url: '', snippet: JSON.stringify(opt) }] }
+    }
+    return { type: 'empty' }
+  }
+
   const arr = Array.isArray(inner.results)
     ? inner.results
     : Array.isArray(inner.passages) ? inner.passages : null
@@ -387,7 +439,10 @@ const decisionLabels: Record<string, string> = {
 }
 
 function toolLabel(tool: string): string {
-  const map: Record<string, string> = { search: '网络搜索', rag_retrieve: 'RAG 检索' }
+  const map: Record<string, string> = {
+    search: '网络搜索', rag_retrieve: 'RAG 检索',
+    gen_sql: '生成SQL', exec_sql: '执行SQL', plot: '图表生成',
+  }
   return map[tool] || tool
 }
 
@@ -462,6 +517,20 @@ function getDecisionLabel(block: LeftBlock): string {
     return planRound(block) >= 3 ? '🔍 需要补搜' : '❓ 信息不足'
   }
   return decisionLabels[d] || d
+}
+
+// ── chatBI 内联图表初始化 ──
+const chartInstances = new Map<Element, echarts.ECharts>()
+function initInlineChart(el: HTMLElement | null, optionJson: string | undefined) {
+  if (!el || !optionJson) return
+  if (chartInstances.has(el)) return  // 已初始化
+  try {
+    const opt = JSON.parse(optionJson)
+    opt.backgroundColor = 'transparent'
+    const chart = echarts.init(el)
+    chart.setOption(opt)
+    chartInstances.set(el, chart)
+  } catch { /* ignore */ }
 }
 </script>
 
@@ -915,6 +984,50 @@ function getDecisionLabel(block: LeftBlock): string {
   content: ' · 重试';
   color: #fbbf24;
   font-size: 11px;
+}
+
+/* chatBI 工具结果样式 */
+.sql-preview {
+  background: #1a1a2e;
+  color: #cdd6f4;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: 'Fira Code', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.chatbi-table-wrap :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.chatbi-table-wrap :deep(th),
+.chatbi-table-wrap :deep(td) {
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 4px 8px;
+  text-align: left;
+  color: #fff;
+}
+.chatbi-table-wrap :deep(th) {
+  background: rgba(167,139,250,0.15);
+  font-weight: 600;
+}
+.chatbi-table-wrap :deep(tr:nth-child(even)) {
+  background: rgba(255,255,255,0.02);
+}
+
+.inline-chart-container {
+  width: 100%;
+  height: 260px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
 }
 
 @media (max-width: 767px) {
