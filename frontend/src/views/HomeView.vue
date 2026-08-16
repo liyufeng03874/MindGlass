@@ -279,7 +279,7 @@ const scenes = ref<Scene[]>([
     name: '通用',
     emoji: '🌐',
     desc: '网络搜索 · 实时信息 / 新闻 / 对比',
-    questions: ['【待填】通用问题 1', '【待填】通用问题 2', '【待填】通用问题 3'],
+    questions: ['2026年AI开发岗位怎么样？', '成都、杭州、北京生活成本对比', '介绍一下Deepseek harness'],
   },
 ])
 
