@@ -522,6 +522,11 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
             ]
         series.append(s)
 
+    # 单指标 + 有 ID 标签列：tooltip 里额外展示标签（排除 X 轴那列，避免重复）
+    # 用 trigger="item"（悬浮单根柱子），{@字段} 模板在此模式下 100% 生效
+    display_label_cols = [c for c in label_cols if c != x_col]
+    _item_trigger_single = chart_type == "bar" and len(y_cols) == 1 and display_label_cols
+
     option = {
         "backgroundColor": "transparent",
         "color": _PALETTE,
@@ -531,7 +536,7 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
             "left": "center",
         },
         "tooltip": {
-            "trigger": "axis" if chart_type != "pie" else "item",
+            "trigger": "item" if _item_trigger_single else ("axis" if chart_type != "pie" else "item"),
             "backgroundColor": "rgba(30,30,46,0.85)",
             "borderColor": "rgba(255,255,255,0.1)",
             "textStyle": {"color": "#e0e0e0", "fontSize": 13},
@@ -544,9 +549,7 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
         "series": series,
     }
 
-    # 单指标 + 有 ID 标签列：tooltip 里额外展示标签（排除 X 轴那列，避免重复）
-    display_label_cols = [c for c in label_cols if c != x_col]
-    if display_label_cols and len(y_cols) == 1:
+    if _item_trigger_single:
         tip_parts = [f"{x_col}: {{b}}"] + [f"{lc}: {{@{lc}}}" for lc in display_label_cols]
         option["tooltip"]["formatter"] = "<br/>".join(tip_parts)
 
