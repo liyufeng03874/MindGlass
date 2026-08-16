@@ -447,13 +447,19 @@ def _infer_chart_type(columns: list[str], rows: list[dict]) -> str:
 
 
 # ID/编号类列（emp_no、dept_no、orderid 等）不该当数值指标画柱子，只当标签用
-_ID_SUFFIXES = ("id", "_id", "no", "_no", "_code", "_sn", "_uuid", "编号", "序号", "编码", "号")
+_ID_SUFFIXES = ("id", "_id", "no", "_no", "_code", "_sn", "_uuid", "编号", "序号", "编码", "号", "_rank", "rank", "排名", "名次")
 _ID_EXACT = {"id", "ids", "no", "code"}
 
 
 def _is_number(v) -> bool:
     """判断是不是数值（含 Decimal——pymysql 对 DECIMAL/AVG/SUM 返回该类型）"""
     return isinstance(v, (int, float, Decimal))
+
+
+def _looks_like_rank_column(name: str) -> bool:
+    """判断列是不是排名类列（rank/排名/名次）"""
+    n = str(name).lower().strip()
+    return any(k in n for k in ("rank", "排名", "名次"))
 
 
 def _looks_like_id_column(name: str) -> bool:
@@ -584,7 +590,7 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
                 }
             # 单指标 + 有 ID 标签：柱顶显示标签值（如 emp_no），一眼看出是哪个员工
             if len(y_cols) == 1 and display_label_cols:
-                lc = display_label_cols[0]
+                lc = next((c for c in display_label_cols if _looks_like_rank_column(c)), display_label_cols[0])
                 for s in option["series"]:
                     s["label"] = {
                         "show": True,
