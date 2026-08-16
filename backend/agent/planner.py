@@ -148,6 +148,7 @@ async def _initial_plan(query: str, stream_emit=None, node_id: str = None, node_
         parsed["plan_count"] = 1
         return parsed
     except Exception:
+        print("[agent/planner.py] 捕获到异常 Exception（except 行 150）", flush=True)
         return {
             "thought": "无法解析规划结果，使用默认搜索策略",
             "steps": [
@@ -222,6 +223,7 @@ async def _decide(query: str, observe_outputs: list[dict], plan_count: int,
         return parsed
     except Exception:
         # 解析失败：如果信息看起来够了就 sufficient，否则 terminate
+        print("[agent/planner.py] 捕获到异常 Exception（except 行 223）", flush=True)
         if plan_count >= MAX_PLAN_COUNT:
             return {
                 "decision": "terminate",

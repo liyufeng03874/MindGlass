@@ -26,6 +26,7 @@ import urllib.request
 try:
     import redis as _redis
 except ImportError:
+    print("[state/redis_cache.py] 捕获到异常 ImportError（except 行 28）", flush=True)
     _redis = None
 
 REDIS_HOST = os.getenv("MINDGLASS_REDIS_HOST", "127.0.0.1")
@@ -193,6 +194,7 @@ def health() -> dict:
         c.ping()
         return {"redis": "ok", "host": REDIS_HOST, "port": REDIS_PORT}
     except Exception:
+        print("[state/redis_cache.py] 捕获到异常 Exception（except 行 195）", flush=True)
         return {"redis": "down"}
 
 
@@ -259,6 +261,7 @@ def find_reusable(query: str, threshold: float = None) -> dict:
             try:
                 item = json.loads(raw)
             except Exception:
+                print("[state/redis_cache.py] 捕获到异常 Exception（except 行 261）", flush=True)
                 continue
             cached_vec = item.get("vector", [])
             if len(cached_vec) != len(vec):

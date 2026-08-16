@@ -75,6 +75,7 @@ async def _try_acquire_agent() -> bool:
         await asyncio.wait_for(_agent_lock.acquire(), timeout=0.1)
         return True
     except asyncio.TimeoutError:
+        print("[server.py] 捕获到异常 TimeoutError（except 行 77）", flush=True)
         return False
 
 
@@ -83,6 +84,7 @@ def _release_agent():
         try:
             _agent_lock.release()
         except RuntimeError:
+            print("[server.py] 捕获到异常 RuntimeError（except 行 85）", flush=True)
             pass
 
 
@@ -356,6 +358,7 @@ def list_demos():
             graph = snap.get("data", {}).get("graph", snap)
             label = graph.get("meta", {}).get("query", "").strip()
         except Exception:
+            print("[server.py] 捕获到异常 Exception（except 行 358）", flush=True)
             pass
         if not label:
             # 文件里没有 query，用编号兜底，不暴露文件名

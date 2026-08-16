@@ -79,6 +79,7 @@ def _extract_json(text: str) -> Optional[dict]:
         if isinstance(obj, dict):
             return obj
     except Exception:
+        print("[agent/react_loop.py] 捕获到异常 Exception（except 行 81）", flush=True)
         pass
     start = cleaned.find("{")
     end = cleaned.rfind("}")
@@ -88,6 +89,7 @@ def _extract_json(text: str) -> Optional[dict]:
             if isinstance(obj, dict):
                 return obj
         except Exception:
+            print("[agent/react_loop.py] 捕获到异常 Exception（except 行 90）", flush=True)
             pass
     return None
 
@@ -325,8 +327,10 @@ class ReactLoop:
             )
             return True, result
         except asyncio.TimeoutError:
+            print("[agent/react_loop.py] 捕获到异常 TimeoutError（except 行 327）", flush=True)
             return False, {"error": f"工具 {tool_name} 执行超时（{TOOL_TIMEOUT}s）"}
         except Exception as e:
+            print("[agent/react_loop.py] 捕获到异常 Exception（except 行 329）", flush=True)
             return False, {"error": f"工具执行失败: {str(e)}"}
 
     # ── 节点创建 ──
@@ -591,6 +595,7 @@ class ReactLoop:
             try:
                 is_safe, conf = await asyncio.to_thread(check_safety, plan_reasoning)
             except Exception:
+                print("[agent/react_loop.py] 捕获到异常 Exception（except 行 593）", flush=True)
                 is_safe, conf = True, 0.0
             if not is_safe:
                 # Plan 触发安全拦截：强制终止，标记安全中断
@@ -625,6 +630,7 @@ class ReactLoop:
             parsed["plan_count"] = 1
             return parsed
         except Exception:
+            print("[agent/react_loop.py] 捕获到异常 Exception（except 行 627）", flush=True)
             return {
                 "thought": "无法解析规划结果，使用默认搜索策略",
                 "steps": [
@@ -652,6 +658,7 @@ class ReactLoop:
                 }
             return parsed
         except Exception:
+            print("[agent/react_loop.py] 捕获到异常 Exception（except 行 654）", flush=True)
             if plan_count >= MAX_PLAN_COUNT:
                 return {
                     "decision": "terminate",
@@ -942,6 +949,7 @@ class ReactLoop:
                         try:
                             is_safe, conf = pending_check.result()
                         except Exception:
+                            print("[agent/react_loop.py] 捕获到异常 Exception（except 行 944）", flush=True)
                             is_safe, conf = True, 0.0
                         pending_check = None
                         if not is_safe:
@@ -966,6 +974,7 @@ class ReactLoop:
                 try:
                     is_safe, conf = await pending_check
                 except Exception:
+                    print("[agent/react_loop.py] 捕获到异常 Exception（except 行 968）", flush=True)
                     is_safe, conf = True, 0.0
                 if not is_safe:
                     safety_triggered = True
@@ -978,6 +987,7 @@ class ReactLoop:
             if not safety_triggered:
                 full_text = self._last_stream_content or full_text
         except Exception:
+            print("[agent/react_loop.py] 捕获到异常 Exception（except 行 980）", flush=True)
             full_text = f"回答生成超时（{LLM_TIMEOUT}s），请重试。"
 
         # 打断处理：把已流出的部分回答物化为 replaced 节点，发 interrupted 事件收束前端，终止本次 run
@@ -1201,6 +1211,7 @@ class ReactLoop:
                 try:
                     results.append(t.result())
                 except (asyncio.CancelledError, Exception):
+                    print("[agent/react_loop.py] 捕获到异常 Exception（except 行 1203）", flush=True)
                     results.append((s, False, {"error": "工具执行被用户打断"}))
 
         # 按原始顺序创建节点

@@ -121,6 +121,7 @@ async def observe(query: str, raw_results: list[dict], previous_outputs: list[di
         return parsed
     except Exception:
         # 解析失败时返回兜底结构
+        print("[agent/observer.py] 捕获到异常 Exception（except 行 122）", flush=True)
         return {
             "round": round_num,
             "summary": "评估结果解析失败,原始结果已保留",

@@ -129,6 +129,7 @@ async def tool_search(query: str, top_k: int = 5) -> dict:
             else:
                 return {"query": query, "error": f"Tavily API error: {resp.status_code} - {resp.text}", "results": []}
     except Exception as e:
+        print("[agent/tools.py] 捕获到异常 Exception（except 行 131）", flush=True)
         return {"query": query, "error": str(e), "results": []}
 
 
@@ -167,6 +168,7 @@ async def tool_rag_retrieve(query: str, top_k: int = 5) -> dict:
                     "count": 0,
                 }
     except Exception as e:
+        print("[agent/tools.py] 捕获到异常 Exception（except 行 169）", flush=True)
         return {
             "query": query,
             "error": str(e),
@@ -243,6 +245,7 @@ async def tool_gen_sql(query: str, schema_hint: str = "") -> dict:
 
         return {"sql": sql_text, "query": query}
     except Exception as e:
+        print("[agent/tools.py] 捕获到异常 Exception（except 行 245）", flush=True)
         return {"error": f"SQL 生成失败: {str(e)}", "query": query}
 
 
@@ -284,6 +287,7 @@ async def tool_exec_sql(sql: str) -> dict:
             result["_cache_hit"] = True
             return result
         except Exception:
+            print("[agent/tools.py] 捕获到异常 Exception（except 行 286）", flush=True)
             pass
 
     # 3. 执行 SQL
@@ -328,8 +332,10 @@ async def tool_exec_sql(sql: str) -> dict:
 
         return result
     except ImportError:
+        print("[agent/tools.py] 捕获到异常 ImportError（except 行 330）", flush=True)
         return {"error": "pymysql 未安装，请 pip install pymysql", "sql": sql}
     except Exception as e:
+        print("[agent/tools.py] 捕获到异常 Exception（except 行 332）", flush=True)
         return {"error": f"SQL 执行失败: {str(e)}", "sql": sql}
 
 
@@ -416,6 +422,7 @@ async def _get_schema_cached() -> str:
             await _redis_set(cache_key, schema_text, ttl=3600)
             all_schemas.append(f"=== 数据库: {db_name} ===\n{schema_text}")
         except Exception as e:
+            print("[agent/tools.py] 捕获到异常 Exception（except 行 418）", flush=True)
             all_schemas.append(f"=== 数据库: {db_name} ===\n(schema 获取失败: {str(e)})")
 
     return "\n\n".join(all_schemas)
@@ -662,6 +669,7 @@ async def _get_redis():
             )
             await _redis_pool.ping()
         except Exception:
+            print("[agent/tools.py] 捕获到异常 Exception（except 行 664）", flush=True)
             _redis_pool = None
             if not _redis_warned:
                 _redis_warned = True
@@ -676,6 +684,7 @@ async def _redis_get(key: str) -> Optional[str]:
         if r:
             return await r.get(key)
     except Exception:
+        print("[agent/tools.py] 捕获到异常 Exception（except 行 678）", flush=True)
         pass
     return None
 
@@ -687,6 +696,7 @@ async def _redis_set(key: str, value: str, ttl: int = 3600) -> bool:
             await r.set(key, value, ex=ttl)
             return True
     except Exception:
+        print("[agent/tools.py] 捕获到异常 Exception（except 行 689）", flush=True)
         pass
     return False
 
@@ -708,6 +718,7 @@ async def execute_tool(tool_name: str, params: dict) -> dict:
             "result": result,
         }
     except Exception as e:
+        print("[agent/tools.py] 捕获到异常 Exception（except 行 710）", flush=True)
         return {
             "tool": tool_name,
             "params": params,
