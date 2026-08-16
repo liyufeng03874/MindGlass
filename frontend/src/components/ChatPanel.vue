@@ -120,20 +120,39 @@ function initECharts() {
     wrappers.forEach((el) => {
       const encoded = el.getAttribute('data-echarts-option')
       if (!encoded) return
-      try {
-        const option = JSON.parse(decodeURIComponent(encoded))
-        // 后端已生成深色主题 option，这里只做兑底
-        option.backgroundColor = 'transparent'
-        const chart = echarts.init(el as HTMLElement)
-        chart.setOption(option)
-        chartInstances.set(el, chart)
-        el.setAttribute('data-initialized', 'true')
-      } catch (e) {
-        console.error('[ChatPanel] ECharts init failed:', e)
-        ;(el as HTMLElement).innerHTML = '<span style="color:#f87171;font-size:12px;">图表渲染失败</span>'
+      // 容器还没尺寸（移动端 tab 切换时 left-panel 被 display:none）→ 挂 ResizeObserver 等可见再 init
+      if (el.clientWidth === 0 || el.clientHeight === 0) {
+        try {
+          const ro = new ResizeObserver(() => {
+            if (el.clientWidth > 0 && el.clientHeight > 0) {
+              ro.disconnect()
+              initSingleChart(el as HTMLElement, encoded)
+            }
+          })
+          ro.observe(el)
+        } catch { /* ignore */ }
+        return
       }
+      initSingleChart(el as HTMLElement, encoded)
     })
   })
+}
+
+/** 初始化单个 echarts-wrapper */
+function initSingleChart(el: HTMLElement, encoded: string) {
+  if (el.getAttribute('data-initialized')) return
+  try {
+    const option = JSON.parse(decodeURIComponent(encoded))
+    // 后端已生成深色主题 option，这里只做兑底
+    option.backgroundColor = 'transparent'
+    const chart = echarts.init(el)
+    chart.setOption(option)
+    chartInstances.set(el, chart)
+    el.setAttribute('data-initialized', 'true')
+  } catch (e) {
+    console.error('[ChatPanel] ECharts init failed:', e)
+    el.innerHTML = '<span style="color:#f87171;font-size:12px;">图表渲染失败</span>'
+  }
 }
 
 // ── MutationObserver: 监听 DOM 变化自动初始化 ECharts ──
@@ -150,16 +169,21 @@ onMounted(() => {
   }
   // 窗口 resize 时重排图表
   window.addEventListener('resize', handleResize)
+  // 移动端 tab 切换回聊天时，强制重排 + 补 init 宽高为 0 的图表
+  window.addEventListener('mindglass:charts-resize', handleResize)
 })
 
 onUnmounted(() => {
   observer?.disconnect()
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('mindglass:charts-resize', handleResize)
   chartInstances.forEach(c => c.dispose())
   chartInstances.clear()
 })
 
 function handleResize() {
+  // 重扫未初始化图表（容器刚有尺寸，ResizeObserver 异步可能未触发）
+  initECharts()
   chartInstances.forEach(c => c.resize())
 }
 

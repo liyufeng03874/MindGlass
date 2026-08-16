@@ -236,7 +236,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import MarkdownIt from 'markdown-it'
 import type { LeftBlock } from '../types/agent'
@@ -356,7 +356,6 @@ function parsedToolResult(block: LeftBlock): ParsedToolResult | null {
     return { type: 'chatbi_table' as any, items: [{ title: `${total} 行`, url: '', snippet: tableHtml }] }
   }
   if (toolName === 'plot') {
-    console.log('[parsedToolResult] plot: inner keys:', Object.keys(inner), 'has echarts_option:', !!inner.echarts_option)
     if (inner.error) return { type: 'error', message: inner.error }
     const opt = inner.echarts_option
     if (opt) {
@@ -560,8 +559,37 @@ function doInitChart(el: HTMLElement, optionJson: string) {
     const chart = echarts.init(el)
     chart.setOption(opt)
     chartInstances.set(el, chart)
+    // 持续观察容器尺寸：移动端 tab 切换（display:none → 显示）时宽度变化，自动 resize
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) {
+        chart.resize()
+      }
+    })
+    ro.observe(el)
   } catch { /* ignore */ }
 }
+
+/** 强制刷新所有图表（移动端 tab 切换 / 容器恢复可见时调用） */
+function resizeAllCharts() {
+  // 先处理等待中的图表（容器刚有尺寸）
+  for (const [el, opt] of pendingCharts) {
+    if (el.clientWidth > 0 && el.clientHeight > 0) {
+      pendingCharts.delete(el)
+      doInitChart(el, opt)
+    }
+  }
+  for (const chart of chartInstances.values()) {
+    chart.resize()
+  }
+}
+
+// 监听 tab 切换广播：切回聊天 tab 时强制全量 resize，确保 echarts 撑满容器
+onMounted(() => {
+  window.addEventListener('mindglass:charts-resize', resizeAllCharts)
+})
+onUnmounted(() => {
+  window.removeEventListener('mindglass:charts-resize', resizeAllCharts)
+})
 </script>
 
 <style scoped>

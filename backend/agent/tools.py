@@ -484,16 +484,29 @@ def _json_safe(v):
     return v
 
 
+def _is_time_column(name: str) -> bool:
+    """判断列是不是时间/趋势列（year/month/date 等）——这类列应该做 X 轴维度，而不是数值指标序列"""
+    n = str(name).lower().strip()
+    if n in ("year", "years", "month", "months", "date", "time", "quarter", "week", "day", "hour",
+             "日期", "时间", "年份", "月份", "季度", "星期", "周", "年", "月"):
+        return True
+    return any(n.endswith(s) for s in ("_year", "_month", "_date", "_time", "_quarter", "_week", "_day",
+                                       "年份", "月份", "日期", "时间", "季度"))
+
+
 def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str, title: str) -> dict:
     """构建 ECharts option JSON"""
     if not rows:
         return {}
 
-    # 列分类：维度列 / 数值指标列 / ID 标签列
+    # 列分类：时间列→X轴维度 / 数值列→指标 / ID标签列（year 等时间列必须当维度，不当指标画线）
     dims, metrics, label_cols = [], [], []
     for c in columns:
         if _looks_like_id_column(c):
             label_cols.append(c)
+        elif _is_time_column(c):
+            if c not in dims:
+                dims.append(c)
         elif _is_number(rows[0].get(c)):
             metrics.append(c)
         elif c not in dims:

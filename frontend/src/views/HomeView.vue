@@ -295,10 +295,20 @@ function onSceneQuestion(q: string) {
 /** 直接输入入口：不选场景，进入正常聊天态（rounds 空 → 开场白 + 输入框自然出现） */
 function onDirectEnter() {
   entered.value = true
-  if (!showGraph.value) {
-    showGraph.value = true
+  // 移动端直接输入 → 进聊天 tab（不跳思维 tab）
+  if (isMobile.value) {
+    showGraph.value = false
   }
 }
+
+// 移动端 tab 切换：回到聊天 tab 时广播事件，让聊天里的图表强制 resize
+watch(showGraph, (v) => {
+  if (isMobile.value && !v) {
+    setTimeout(() => {
+      window.dispatchEvent(new Event('mindglass:charts-resize'))
+    }, 250)
+  }
+})
 
 /** 回退到入场页（清空当前对话） */
 function backToScene() {
