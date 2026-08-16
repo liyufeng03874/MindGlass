@@ -1610,6 +1610,16 @@ class ReactLoop:
         """
         yield self._emit("status", {"message": "🔄 正在恢复推理..."})
 
+        # 0. 守卫：如果图中已有完成的 Answer，说明推理已完成，不应再续跑（否则会叠加出第二条决策链/第二个 Answer）
+        has_done_answer = any(
+            n.type == "Answer" and n.status == "done"
+            for n in self.store.nodes
+        )
+        if has_done_answer:
+            yield self._emit("status", {"message": "✅ 推理已完成，无需续跑"})
+            yield self._emit("run_complete", {"graph": self.store.to_dict()})
+            return
+
         # 1. 找最后一个活跃（非 discarded/branch/replaced/pending）节点
         active_nodes = [
             n for n in self.store.nodes
@@ -1619,7 +1629,13 @@ class ReactLoop:
             yield self._emit("error", {"message": "图中无活跃节点，无法续跑"})
             return
 
-        last_node = max(active_nodes, key=lambda n: n.step_index)
+        # 1b. 找真正断点：最后一个“没有 done 后继节点”的活跃节点。
+        #     断连发生在决策循环中途时，图里可能已有多个 done 节点（Observe/Plan 已生成），
+        #     若直接从“最大 step_index 活跃节点”续跑，会重复跑已完成的 Observe/Plan，叠加出乱图。
+        #     正确锚点 = 图中“末端”（无出边后继）的活跃节点。
+        has_successor = {e.from_id for e in self.store.edges}
+        terminal_active = [n for n in active_nodes if n.id not in has_successor]
+        last_node = max(terminal_active, key=lambda n: n.step_index)
         self.step_index = last_node.step_index + 1
 
         # 2. 收集已有的 observe_outputs
