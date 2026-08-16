@@ -226,6 +226,9 @@ class ReactLoop:
                         q.put(("chunk", token, ft))
                 q.put(("done", "", ft))
             except Exception as e:
+                import traceback
+                print(f"[react_loop] _run_stream LLM 异常: {type(e).__name__}: {e}")
+                traceback.print_exc()
                 q.put(("error", str(e), ""))
 
         # 在线程池中启动，不阻塞事件循环
