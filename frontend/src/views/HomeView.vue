@@ -265,7 +265,7 @@ const scenes = ref<Scene[]>([
     name: '法律',
     emoji: '⚖️',
     desc: '知识库检索 · 法条 / 案例 / 文书',
-    questions: ['【待填】法律问题 1', '【待填】法律问题 2', '【待填】法律问题 3'],
+    questions: ['醉驾撞人一般怎么判，有类似案例吗？', '我想了解一些关于吸毒的案件判决结果？', '有没有故意伤人但由于态度良好而减轻量刑的事件？'],
   },
   {
     id: 'data',
@@ -413,7 +413,7 @@ function clearDemo() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-top: -150px;
+  transform: translateY(-150px);
   margin-bottom: 36px;
   animation: scene-fade-in 0.7s ease both;
 }
