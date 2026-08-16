@@ -132,14 +132,25 @@ def _compute_stats(snapshot: dict) -> dict:
             plan_count += 1
         elif ntype == "ToolCall":
             toolcall_count += 1
-            # 工具失败：status=error 或 result 为空（后端没启/返回空结果）
-            # ⚠️ ToolCall 的结果在 data.result，不是 data.output（output 是 Plan/Answer 的字段）
+            # 工具失败判定：status=error / result 为空 / 检索类工具返回空结果（passages 空）
             if status == "error":
                 tool_error_count += 1
             else:
                 result = n.get("data", {}).get("result")
                 if result is None or (isinstance(result, str) and not result.strip()):
                     tool_error_count += 1
+                elif isinstance(result, dict):
+                    # 检索类工具返回空 passages → 算失败（之前漏判：error 为空串但检索空结果）
+                    inner = result.get("result", result)
+                    if isinstance(inner, dict) and ("passages" in inner or "results" in inner or "count" in inner):
+                        # ⚠️ 不能用 inner.get("passages") or inner.get("results")：空 list 是 falsy 会被 or 吞掉
+                        passages = inner.get("passages")
+                        if passages is None:
+                            passages = inner.get("results")
+                        if passages is not None and len(passages) == 0:
+                            tool_error_count += 1
+                    elif result.get("error"):
+                        tool_error_count += 1
         elif ntype == "Observe":
             observe_count += 1
         elif ntype == "Answer":

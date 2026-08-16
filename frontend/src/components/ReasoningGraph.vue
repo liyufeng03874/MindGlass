@@ -219,6 +219,7 @@ import MarkdownIt from 'markdown-it'
 import MirrorIcon from './MirrorIcon.vue'
 import { useReasoningGraph } from '@/composables/useReasoningGraph'
 import type { ReasoningGraph, AgentNode } from '@/types/agent'
+import { fixTooltipFormatter } from '@/utils/echartsTooltip'
 
 const props = defineProps<{
   graph: ReasoningGraph | null
@@ -360,6 +361,7 @@ function initPlotRef(el: HTMLElement | null) {
         plotChartInstance = echarts.init(el)
         const chartOpt = JSON.parse(JSON.stringify(opt))
         chartOpt.backgroundColor = 'transparent'
+        fixTooltipFormatter(chartOpt)
         plotChartInstance.setOption(chartOpt)
       })
       return
@@ -368,6 +370,7 @@ function initPlotRef(el: HTMLElement | null) {
     plotChartInstance = echarts.init(el)
     const chartOpt = JSON.parse(JSON.stringify(opt))
     chartOpt.backgroundColor = 'transparent'
+    fixTooltipFormatter(chartOpt)
     plotChartInstance.setOption(chartOpt)
   } else {
     console.warn('[plot-ref] no echarts_option found, result keys:', Object.keys(r || {}))

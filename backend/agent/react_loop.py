@@ -1273,6 +1273,13 @@ class ReactLoop:
                         "reason": f"工具自动重试预算耗尽（{_MAX_AUTO_RETRY} 次）",
                         "partial_answer_note": self._retry_exhausted_reason,
                     }
+                    # 同步更新已创建的 Plan 节点：data 是 plan_result 的引用（decision 已改），
+                    # 但 label/output 是创建时的旧值，残留“决策：需要补搜”，图上标题显示错误
+                    for _pn in self.store.nodes:
+                        if _pn.type == "Plan" and _pn.data is plan_result:
+                            _pn.label = "决策：重试耗尽"
+                            _pn.data["output"] = self._retry_exhausted_reason
+                            break
                     break
 
             # 执行工具

@@ -57,6 +57,7 @@ import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import MarkdownIt from 'markdown-it'
 import * as echarts from 'echarts'
 import type { Round, LeftBlock } from '../types/agent'
+import { fixTooltipFormatter } from '../utils/echartsTooltip'
 import MirrorIcon from './MirrorIcon.vue'
 import ThoughtBlockList from './ThoughtBlockList.vue'
 import { usePhase, phaseColor } from '../composables/usePhase'
@@ -145,6 +146,8 @@ function initSingleChart(el: HTMLElement, encoded: string) {
     const option = JSON.parse(decodeURIComponent(encoded))
     // 后端已生成深色主题 option，这里只做兑底
     option.backgroundColor = 'transparent'
+    // ECharts 6 不支持 {@字段} 模板，编译成函数 formatter
+    fixTooltipFormatter(option)
     const chart = echarts.init(el)
     chart.setOption(option)
     chartInstances.set(el, chart)

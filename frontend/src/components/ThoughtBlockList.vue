@@ -240,6 +240,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import MarkdownIt from 'markdown-it'
 import type { LeftBlock } from '../types/agent'
+import { fixTooltipFormatter } from '../utils/echartsTooltip'
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
@@ -556,6 +557,8 @@ function doInitChart(el: HTMLElement, optionJson: string) {
   try {
     const opt = JSON.parse(optionJson)
     opt.backgroundColor = 'transparent'
+    // ECharts 6 不支持 {@字段} 模板，编译成函数 formatter
+    fixTooltipFormatter(opt)
     const chart = echarts.init(el)
     chart.setOption(opt)
     chartInstances.set(el, chart)

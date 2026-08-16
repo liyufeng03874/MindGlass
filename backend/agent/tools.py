@@ -146,7 +146,8 @@ async def tool_rag_retrieve(query: str, top_k: int = 5) -> dict:
     POST /api/chat/retrieve
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # ECS 法镜 embedding+reranker 在 4 核 CPU 上可能 40-60s，超时放宽到 90s 避免被截断成空
+        async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
                 f"{RAG_API_URL}/api/chat/retrieve",
                 json={"message": query},
@@ -494,15 +495,24 @@ def _is_time_column(name: str) -> bool:
                                        "年份", "月份", "日期", "时间", "季度"))
 
 
+def _is_name_column(name: str) -> bool:
+    """判断列是不是姓名类列（first_name/last_name/姓名/名字）——tooltip 里应展示"谁"，不当维度/指标"""
+    n = str(name).lower().strip()
+    return n in ("first_name", "last_name", "name", "full_name", "emp_name", "ename",
+                 "姓名", "名字", "员工姓名", "员工名", "负责人", "客户名", "客户姓名")
+
+
 def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str, title: str) -> dict:
     """构建 ECharts option JSON"""
     if not rows:
         return {}
 
-    # 列分类：时间列→X轴维度 / 数值列→指标 / ID标签列（year 等时间列必须当维度，不当指标画线）
+    # 列分类：时间列→X轴维度 / 数值列→指标 / ID标签列 / 姓名列（year 等时间列必须当维度，不当指标画线）
     dims, metrics, label_cols = [], [], []
     for c in columns:
         if _looks_like_id_column(c):
+            label_cols.append(c)
+        elif _is_name_column(c):
             label_cols.append(c)
         elif _is_time_column(c):
             if c not in dims:
@@ -601,9 +611,17 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
                         ],
                     },
                 }
-            # 单指标 + 有 ID 标签：柱顶显示标签值（如 emp_no），一眼看出是哪个员工
+            # 单指标 + 有标签列：柱顶显示标签值（优先姓名→员工号→排名），一眼看出是哪个员工
             if len(y_cols) == 1 and display_label_cols:
-                lc = next((c for c in display_label_cols if _looks_like_rank_column(c)), display_label_cols[0])
+                def _label_prio(c: str) -> int:
+                    if _looks_like_rank_column(c):
+                        return 0  # 排名列优先
+                    if _is_name_column(c):
+                        return 1  # 姓名次之
+                    if _looks_like_id_column(c):
+                        return 2  # 编号列
+                    return 3
+                lc = min(display_label_cols, key=_label_prio)
                 for s in option["series"]:
                     s["label"] = {
                         "show": True,

@@ -346,6 +346,7 @@ function loadTestData(demoName: string) {
       graph.value = data.graph
       showGraph.value = true
       demoLoaded.value = true
+      entered.value = true  // 初始界面加载 demo 后也要进入对话态（否则停留在入场页）
 
       // 提取 Answer 节点的 output 填充到聊天
       const answerNode = data.graph?.nodes?.find((n: any) => n.type === 'Answer' && n.status === 'done')
