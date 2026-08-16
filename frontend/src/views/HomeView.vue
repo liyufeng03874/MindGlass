@@ -45,6 +45,40 @@
     </header>
 
     <main class="main-content" :class="{ 'show-graph': showGraph && isMobile }">
+      <!-- 场景选择层：未开始对话时显示，点击问题直接发起推理 -->
+      <div v-if="!hasNodes" class="scene-selector">
+        <div class="scene-head">
+          <div class="scene-title">选择场景开始探索</div>
+          <div class="scene-sub">思镜会根据问题类型自动调度 知识库检索 / 数据库分析 / 网络搜索</div>
+        </div>
+        <div class="scene-cards">
+          <div
+            v-for="sc in scenes"
+            :key="sc.id"
+            class="scene-card"
+            :class="sc.id"
+          >
+            <div class="scene-card-head">
+              <span class="scene-emoji">{{ sc.emoji }}</span>
+              <span class="scene-name">{{ sc.name }}</span>
+            </div>
+            <div class="scene-desc">{{ sc.desc }}</div>
+            <div class="scene-questions">
+              <button
+                v-for="(q, qi) in sc.questions"
+                :key="qi"
+                class="scene-question"
+                :style="{ animationDelay: (qi * 0.4) + 's' }"
+                @click="onSceneQuestion(q)"
+              >
+                <span class="q-icon">›</span>
+                <span class="q-text">{{ q }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div :class="['left-panel', { full: !showGraph || isMobile }]">
         <ChatPanel
           ref="chatPanelRef"
@@ -197,6 +231,42 @@ function onSend(query: string) {
   }
 }
 
+// ── 场景选择：三领域 + 预设问题（问题由哥哥提供，占位先跑通效果）──
+interface Scene {
+  id: string
+  name: string
+  emoji: string
+  desc: string
+  questions: string[]
+}
+const scenes = ref<Scene[]>([
+  {
+    id: 'legal',
+    name: '法律',
+    emoji: '⚖️',
+    desc: '知识库检索 · 法条 / 案例 / 文书',
+    questions: ['【待填】法律问题 1', '【待填】法律问题 2', '【待填】法律问题 3'],
+  },
+  {
+    id: 'data',
+    name: '数据',
+    emoji: '📊',
+    desc: '数据库分析 · 员工 / 订单 / 销售',
+    questions: ['每个部门薪资最高的员工是谁', '各部门平均薪资排名', '销售额月度变化趋势'],
+  },
+  {
+    id: 'general',
+    name: '通用',
+    emoji: '🌐',
+    desc: '网络搜索 · 实时信息 / 新闻 / 对比',
+    questions: ['【待填】通用问题 1', '【待填】通用问题 2', '【待填】通用问题 3'],
+  },
+])
+
+function onSceneQuestion(q: string) {
+  onSend(q)
+}
+
 function onRetry(stepIndex: number, originalNode: any, editedData: Record<string, any>) {
   retryFrom(stepIndex, originalNode, editedData)
 }
@@ -282,6 +352,162 @@ function clearDemo() {
 <style>
 /* 思镜 · 首页暗色玻璃主题（水镜 v2.1 第一遍）
    面板为半透明玻璃，右侧镜台全透——深空星野即水面 */
+
+/* ── 场景选择层（进入页面先选场景）── */
+.scene-selector {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.scene-head {
+  text-align: center;
+  margin-bottom: 28px;
+  animation: scene-fade-in 0.6s ease both;
+}
+
+.scene-title {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-h);
+  letter-spacing: 1px;
+  text-shadow: 0 0 20px rgba(167, 139, 250, 0.35);
+}
+
+.scene-sub {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.scene-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 980px;
+}
+
+.scene-card {
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--panel-border);
+  border-radius: 16px;
+  padding: 20px 18px;
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  animation: scene-card-in 0.6s ease both;
+}
+
+.scene-card:nth-child(1) { animation-delay: 0.05s; }
+.scene-card:nth-child(2) { animation-delay: 0.15s; }
+.scene-card:nth-child(3) { animation-delay: 0.25s; }
+
+.scene-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+  box-shadow: 0 8px 30px rgba(167, 139, 250, 0.15);
+}
+
+.scene-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.scene-emoji {
+  font-size: 20px;
+}
+
+.scene-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.scene-card.legal .scene-name { color: #fbbf24; }
+.scene-card.data .scene-name { color: #60a5fa; }
+.scene-card.general .scene-name { color: #34d399; }
+
+.scene-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+
+.scene-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 问题气泡：半透明胶囊 + 上下浮动 */
+.scene-question {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  animation: scene-float 3.2s ease-in-out infinite;
+}
+
+.scene-question:hover {
+  background: rgba(167, 139, 250, 0.14);
+  border-color: var(--accent);
+  color: var(--text-h);
+  transform: translateY(-2px);
+}
+
+.q-icon {
+  color: var(--accent);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.q-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes scene-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes scene-card-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scene-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 860px) {
+  .scene-cards {
+    grid-template-columns: 1fr;
+    max-width: 420px;
+  }
+  .scene-title { font-size: 20px; }
+}
+
 .mindglass {
   height: 100vh;
   display: flex;
@@ -457,6 +683,7 @@ function clearDemo() {
   display: flex;
   gap: 0;
   overflow: hidden;
+  position: relative;
 }
 
 /* 左翼聊天：半透明玻璃，星空隐约透出（不加 backdrop-blur，以免抹平星点） */
