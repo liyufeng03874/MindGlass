@@ -8,6 +8,7 @@ import httpx
 import json
 import hashlib
 from typing import Callable, Optional
+from decimal import Decimal
 from dotenv import load_dotenv
 import os
 import re
@@ -426,10 +427,12 @@ def _infer_chart_type(columns: list[str], rows: list[dict]) -> str:
 
     # 两列：一维分类 + 一维数值 → pie（少量）或 bar
     if n_cols == 2:
-        first_vals = [r.get(columns[0]) for r in rows[:20]]
-        is_numeric_second = all(isinstance(r.get(columns[1]), (int, float)) for r in rows[:20] if r.get(columns[1]) is not None)
-        if is_numeric_second and n_rows <= 10:
-            return "pie"
+        is_numeric_second = all(_is_number(r.get(columns[1])) for r in rows[:20] if r.get(columns[1]) is not None)
+        if is_numeric_second:
+            metric_name = str(columns[1]).lower()
+            share_hint = any(k in metric_name for k in ("占比", "比例", "份额", "share", "ratio", "rate", "percent", "pct"))
+            if share_hint or n_rows <= 6:
+                return "pie"
         return "bar"
 
     # 含日期/时间列 → line
@@ -442,31 +445,82 @@ def _infer_chart_type(columns: list[str], rows: list[dict]) -> str:
     return "bar"
 
 
+# ID/编号类列（emp_no、dept_no、orderid 等）不该当数值指标画柱子，只当标签用
+_ID_SUFFIXES = ("id", "_id", "no", "_no", "_code", "_sn", "_uuid", "编号", "序号", "编码", "号")
+_ID_EXACT = {"id", "ids", "no", "code"}
+
+
+def _is_number(v) -> bool:
+    """判断是不是数值（含 Decimal——pymysql 对 DECIMAL/AVG/SUM 返回该类型）"""
+    return isinstance(v, (int, float, Decimal))
+
+
+def _looks_like_id_column(name: str) -> bool:
+    """判断列是不是 ID/编号类列（员工号、部门号、订单号等）"""
+    n = str(name).lower().strip()
+    if n in _ID_EXACT:
+        return True
+    return any(n.endswith(s) for s in _ID_SUFFIXES)
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    """#a78bfa → rgba(167,139,250,alpha)"""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _json_safe(v):
+    """Decimal → float，其余原样（保证 option 可直接 JSON 序列化）"""
+    if isinstance(v, Decimal):
+        return float(v)
+    return v
+
+
 def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str, title: str) -> dict:
     """构建 ECharts option JSON"""
     if not rows:
         return {}
 
-    x_col = columns[0]  # 第一列作为 X 轴/分类
-    y_cols = [c for c in columns[1:] if isinstance(rows[0].get(c), (int, float))]
+    # 列分类：维度列 / 数值指标列 / ID 标签列
+    dims, metrics, label_cols = [], [], []
+    for c in columns:
+        if _looks_like_id_column(c):
+            label_cols.append(c)
+        elif _is_number(rows[0].get(c)):
+            metrics.append(c)
+        elif c not in dims:
+            dims.append(c)
+
+    x_col = (dims or columns)[0]  # X 轴/分类列（优先维度列）
+    y_cols = metrics
     if not y_cols:
-        y_cols = columns[1:2]  # 兜底取第二列
+        y_cols = [columns[1]] if len(columns) > 1 else []  # 兜底取第二列
+    if not y_cols:
+        return {}
 
     x_data = [str(r.get(x_col, "")) for r in rows]
-
-    series = []
-    for yc in y_cols:
-        series.append({
-            "name": yc,
-            "type": chart_type,
-            "data": [r.get(yc, 0) for r in rows],
-        })
 
     # ── 深色主题配色（与思镜 UI 统一）──
     _TEXT_COLOR = "#fff"
     _AXIS_LINE = "rgba(255,255,255,0.15)"
     _SPLIT_LINE = "rgba(255,255,255,0.06)"
     _PALETTE = ["#a78bfa", "#60a5fa", "#34d399", "#fbbf24", "#f87171", "#c084fc", "#38bdf8"]
+
+    series = []
+    for yc in y_cols:
+        s = {
+            "name": yc,
+            "type": chart_type,
+            "data": [_json_safe(r.get(yc, 0)) for r in rows],
+        }
+        # 有 ID 标签列（如 emp_no）时，把标签值附到每个数据点，供 tooltip/柱顶标签用
+        if label_cols:
+            s["data"] = [
+                dict({"value": _json_safe(r.get(yc, 0))}, **{lc: _json_safe(r.get(lc)) for lc in label_cols})
+                for r in rows
+            ]
+        series.append(s)
 
     option = {
         "backgroundColor": "transparent",
@@ -490,6 +544,12 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
         "series": series,
     }
 
+    # 单指标 + 有 ID 标签列：tooltip 里额外展示标签（排除 X 轴那列，避免重复）
+    display_label_cols = [c for c in label_cols if c != x_col]
+    if display_label_cols and len(y_cols) == 1:
+        tip_parts = [f"{x_col}: {{b}}"] + [f"{lc}: {{@{lc}}}" for lc in display_label_cols]
+        option["tooltip"]["formatter"] = "<br/>".join(tip_parts)
+
     if chart_type != "pie":
         option["xAxis"] = {
             "type": "category",
@@ -504,28 +564,38 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
             "axisLine": {"show": False},
             "splitLine": {"lineStyle": {"color": _SPLIT_LINE}},
         }
-        # bar 图加圆角 + 渐变
+        # bar 图加圆角 + 渐变（按系列下标取不同配色，避免多系列全同色）
         if chart_type == "bar":
-            for s in option["series"]:
+            for idx, s in enumerate(option["series"]):
+                base = _PALETTE[idx % len(_PALETTE)]
                 s["itemStyle"] = {
                     "borderRadius": [4, 4, 0, 0],
                     "color": {
                         "type": "linear", "x": 0, "y": 0, "x2": 0, "y2": 1,
                         "colorStops": [
-                            {"offset": 0, "color": _PALETTE[0]},
-                            {"offset": 1, "color": "rgba(167,139,250,0.3)"},
+                            {"offset": 0, "color": base},
+                            {"offset": 1, "color": _hex_to_rgba(base, 0.3)},
                         ],
                     },
                 }
+            # 单指标 + 有 ID 标签：柱顶显示标签值（如 emp_no），一眼看出是哪个员工
+            if len(y_cols) == 1 and display_label_cols:
+                lc = display_label_cols[0]
+                for s in option["series"]:
+                    s["label"] = {
+                        "show": True,
+                        "position": "top",
+                        "color": _TEXT_COLOR,
+                        "fontSize": 10,
+                        "formatter": f"{{@{lc}}}",
+                    }
     else:
         # pie 图用 name+value 格式
         option["series"] = [{
             "name": y_cols[0] if y_cols else "",
             "type": "pie",
-            "data": [{"name": x_data[i], "value": rows[i].get(y_cols[0], 0)} for i in range(len(rows))],
+            "data": [{"name": x_data[i], "value": _json_safe(rows[i].get(y_cols[0], 0))} for i in range(len(rows))],
         }]
-        del option["xAxis"]
-        del option["yAxis"]
 
     return option
 
