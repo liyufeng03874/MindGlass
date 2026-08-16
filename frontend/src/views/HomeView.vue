@@ -39,6 +39,14 @@
             {{ showGraph ? '👁️ 隐藏' : '💡 思维' }}
           </button>
         </template>
+        <!-- 场景选择：回退到入场页（仅进入对话后显示） -->
+        <button
+          v-if="entered"
+          class="scene-back-btn"
+          @click="backToScene"
+        >
+          🧭 场景选择
+        </button>
         <!-- Admin 入口：新开标签页，不覆盖当前页 -->
         <a href="/admin" target="_blank" rel="noopener" class="admin-link">🔧</a>
       </div>
@@ -89,33 +97,35 @@
         </div>
       </div>
 
-      <div :class="['left-panel', { 'chat-mode': entered, full: !showGraph || isMobile }]">
-        <ChatPanel
-          ref="chatPanelRef"
-          :rounds="rounds"
-          :disabled="isRunning"
-          :statusText="status"
-          :totalElapsed="isRunning ? null : totalElapsed"
-          @send="onSend"
-          :initialGreeting="initialGreeting"
-        />
-      </div>
-      <transition name="slide">
-        <div v-if="showGraph" class="right-panel">
-          <ReasoningGraph
-            :graph="graph"
-            :isRunning="isRunning"
-            :cutNodeId="cutNode?.id ?? null"
-            :disconnected="disconnected"
-            :autoRetrying="autoRetrying"
-            :autoRetryCount="autoRetryCount"
-            @retry="onRetry"
-            @interrupt="onInterrupt"
-            @focus-answer="onFocusAnswer"
-            @reconnect="reconnect"
+      <template v-if="entered">
+        <div :class="['left-panel', { full: !showGraph || isMobile }]">
+          <ChatPanel
+            ref="chatPanelRef"
+            :rounds="rounds"
+            :disabled="isRunning"
+            :statusText="status"
+            :totalElapsed="isRunning ? null : totalElapsed"
+            @send="onSend"
+            :initialGreeting="initialGreeting"
           />
         </div>
-      </transition>
+        <transition name="slide">
+          <div v-if="showGraph" class="right-panel">
+            <ReasoningGraph
+              :graph="graph"
+              :isRunning="isRunning"
+              :cutNodeId="cutNode?.id ?? null"
+              :disconnected="disconnected"
+              :autoRetrying="autoRetrying"
+              :autoRetryCount="autoRetryCount"
+              @retry="onRetry"
+              @interrupt="onInterrupt"
+              @focus-answer="onFocusAnswer"
+              @reconnect="reconnect"
+            />
+          </div>
+        </transition>
+      </template>
 
       <!-- 手机端底部导航栏 -->
       <div v-if="isMobile" class="mobile-nav">
@@ -290,6 +300,11 @@ function onDirectEnter() {
   }
 }
 
+/** 回退到入场页（清空当前对话） */
+function backToScene() {
+  clearDemo()
+}
+
 function onRetry(stepIndex: number, originalNode: any, editedData: Record<string, any>) {
   retryFrom(stepIndex, originalNode, editedData)
 }
@@ -393,11 +408,12 @@ function clearDemo() {
   background: transparent; /* 全透：深空星野即入场页背景 */
 }
 
-/* empty-state 放大版（原在 ReasoningGraph 内，此处提到入场页顶部） */
+/* empty-state 放大版（原在 ReasoningGraph 内，此处提到入场页顶部，整体上移150px） */
 .landing-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
+  margin-top: -150px;
   margin-bottom: 36px;
   animation: scene-fade-in 0.7s ease both;
 }
@@ -484,6 +500,24 @@ function clearDemo() {
   transform: translateY(-3px);
   border-color: var(--accent);
   box-shadow: 0 8px 30px rgba(167, 139, 250, 0.15);
+}
+
+/* 场景选择回退按钮（右上角，仅进入对话后显示） */
+.scene-back-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.scene-back-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-h);
+  background: rgba(167, 139, 250, 0.1);
 }
 
 /* 直接输入入口：低调次级按钮，三卡下方居中 */
@@ -784,26 +818,24 @@ function clearDemo() {
 }
 
 /* 左翼聊天：半透明玻璃，星空隐约透出（不加 backdrop-blur，以免抹平星点）
-   入场态（未进入对话）背景透明、无分割线，与右侧星野视觉统一；
-   进入对话（chat-mode）后背景平滑渐变回半透明深色 + 分割线出现 */
+   进入对话时 mount，用 animation 从全透平滑渐变到半透明深色 + 分割线浮现 */
 .left-panel {
   width: 50%;
   min-width: 320px;
-  border-right: 1px solid transparent;
-  background: transparent;
-  transition: width 0.3s ease, background 0.6s ease, border-color 0.6s ease;
-}
-
-.left-panel.chat-mode {
-  background: rgba(10, 14, 31, 0.5);
   border-right: 1px solid var(--panel-border);
+  background: rgba(10, 14, 31, 0.5);
+  animation: chat-panel-in 0.6s ease;
 }
 
-/* 入场态：ChatPanel 自带的相位左边框/阴影也隐藏，避免露出第二条分割线 */
-.left-panel:not(.chat-mode) .chat-panel {
-  border-right-color: transparent;
-  box-shadow: none;
-  transition: border-color 0.6s ease, box-shadow 0.6s ease;
+@keyframes chat-panel-in {
+  from {
+    background: transparent;
+    border-right-color: transparent;
+  }
+  to {
+    background: rgba(10, 14, 31, 0.5);
+    border-right-color: var(--panel-border);
+  }
 }
 
 @media (max-width: 768px) {
