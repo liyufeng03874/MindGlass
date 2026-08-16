@@ -91,6 +91,7 @@ DECISION_SYSTEM_PROMPT = f"""你是思小镜，由李雨峰和妹妹小晞共同
 注意：
 - 不要为了补搜而补搜。如果信息已经足够回答问题，直接 sufficient
 - 补搜的 query 不要和已经搜过的语义重复
+- **失败≠缺信息**：如果上一轮工具执行结果里有 [失败] 的工具，说明是执行错误（SQL 报错、检索报错等），不是信息不足。此时应该选择 need_more 让系统修正重试同一工具，或选择 terminate 如实告知失败原因；绝不要把"工具执行失败"当成"信息不足"去建议换工具类型补搜
 - **禁止擅自切换工具类型**：如果原始问题是关于语料库/知识库内容的，补搜仍然必须用 rag_retrieve，不得改用 search。rag_retrieve 没搜到时选 terminate，不要换成 search 继续找
 - **禁止跨类型回退**：如果上一轮用的是 gen_sql/exec_sql/plot（数据库查询），失败后不得回退到 search。应该选 terminate 并在 partial_answer_note 中说明数据库查询失败的原因
 - terminate 时 partial_answer_note 要具体说明哪个方面不完整，不要泛泛而谈

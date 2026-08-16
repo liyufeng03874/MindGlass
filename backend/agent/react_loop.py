@@ -33,6 +33,9 @@ from agent.answerer import generate_answer
 TOOL_TIMEOUT = 120
 LLM_TIMEOUT = 60
 
+# 同一工具失败后自动修正重试的最大次数（超出则如实 terminate，杜绝无限重试死循环）
+_MAX_AUTO_RETRY = 2
+
 
 def _make_node_id(step_index: int, node_type: str) -> str:
     """生成全局唯一节点 ID：类型_stepIndex_uuid前缀"""
@@ -474,6 +477,24 @@ class ReactLoop:
                     if reasoning:
                         parts.append(f"理由: {reasoning[:500]}")
                 parts.append("")
+
+            parts.append("=== 上一轮工具执行结果 ===")
+            outcomes = getattr(self, "_last_tool_outcomes", None) or []
+            if outcomes:
+                for i, (s, ok, res) in enumerate(outcomes):
+                    tool_name = s.get("tool", "search")
+                    err = self._extract_tool_error(res)
+                    if not ok or err is not None:
+                        parts.append(f"\n--- 工具 {i+1}: {tool_name} [失败] ---")
+                        parts.append(f"错误: {err or '执行失败'}")
+                    else:
+                        parts.append(f"\n--- 工具 {i+1}: {tool_name} [成功] ---")
+                        preview = json.dumps(res.get("result", res), ensure_ascii=False, default=self._json_default)
+                        parts.append(f"结果预览: {preview[:600]}")
+                parts.append("\n注意：如果存在 [失败] 的工具，说明是执行错误而非信息不足，决策应优先修正重试该工具，不要换工具类型去补搜。")
+            else:
+                parts.append("（本轮无工具执行）")
+            parts.append("")
 
             parts.append("=== 各轮检索评估报告 ===")
             for obs in observe_outputs:
@@ -1066,6 +1087,8 @@ class ReactLoop:
         """
         self._last_raw_results = []
         self._last_tc_node_ids = []
+        # 记录 (step, ok, res) 三元组，供决策轮识别"工具失败→修正重试 vs 真缺信息→按类型补搜"
+        self._last_tool_outcomes = []
 
         if not steps:
             return
@@ -1095,6 +1118,13 @@ class ReactLoop:
                 tp = s.get("params", {})
                 # chatBI 链路数据传递：exec_sql 自动接收 gen_sql 的输出 SQL
                 # execute_tool 返回结构: {"tool": ..., "params": ..., "result": {...}}
+                # 短路：exec_sql 失败后，后续 plot 不再实际执行（数据源已断），直接记为失败
+                if tn == "plot" and any(
+                    prev_s.get("tool") == "exec_sql" and not prev_ok
+                    for prev_s, prev_ok, _ in results
+                ):
+                    results.append((s, False, {"error": "前置 exec_sql 失败，plot 已跳过"}))
+                    continue
                 if tn == "exec_sql":
                     if not tp.get("sql"):
                         for prev_s, prev_ok, prev_res in results:
@@ -1164,6 +1194,7 @@ class ReactLoop:
             self._last_node = tc_node
             self._last_raw_results.append(res)
             self._last_tc_node_ids.append(tc_node.id)
+            self._last_tool_outcomes.append((s, ok, res))
 
             # 补强 node_complete 事件：带 tool_name、params、result_preview、result_full
             yield self._emit_tool_complete(tc_node, s.get("tool", "search"), s.get("params", {}), res)
@@ -1186,6 +1217,10 @@ class ReactLoop:
         # 会话 ID：前端传入则沿用（多轮对话），否则新建一个（首轮）
         self.store.meta.conversation_id = conversation_id or f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.store.meta.run_started_at = time.time()
+
+        # 重试状态：同一工具失败累计次数 + 上一轮工具执行结果（供失败重试/按类型补搜决策）
+        self._tool_retry_counts: dict = {}
+        self._last_tool_outcomes: list = []
 
         plan_count = 0
         observe_outputs: list[dict] = []
@@ -1228,13 +1263,17 @@ class ReactLoop:
             if plan_count == 1:
                 steps = plan_result.get("steps", [])
             else:
-                # 补搜：将 suggested_queries 转为 steps
-                suggested = plan_result.get("if_need_more", {})
-                queries = suggested.get("suggested_queries", [])
-                if not queries:
-                    # LLM 说 need_more 但没给 query，兜底用原始 query
-                    queries = [self.query]
-                steps = [{"tool": "search", "description": q, "params": {"query": q}} for q in queries]
+                # 决策轮：失败→修正重试 / 真缺信息→按类型补搜（不再硬编码 search）
+                steps, retry_mode = self._build_next_steps(plan_result)
+                if retry_mode == "exhausted":
+                    # 重试预算耗尽：不再补搜，如实 terminate 交 Answer 阶段汇报
+                    plan_result["decision"] = "terminate"
+                    plan_result["reasoning"] = self._retry_exhausted_reason
+                    plan_result["if_terminate"] = {
+                        "reason": f"工具自动重试预算耗尽（{_MAX_AUTO_RETRY} 次）",
+                        "partial_answer_note": self._retry_exhausted_reason,
+                    }
+                    break
 
             # 执行工具
             async for event in self._execute_tools(steps):
@@ -1279,6 +1318,97 @@ class ReactLoop:
             print(f"[WARN] plan_result is None before _answer_phase, nodes={[n.type for n in self.store.nodes]}")
         async for event in self._answer_phase(observe_outputs, plan_result):
             yield event
+
+    # ── 决策轮步骤生成：失败重试 vs 按类型补搜 ──
+
+    @staticmethod
+    def _extract_tool_error(res) -> Optional[str]:
+        """从工具结果中提取错误信息；无错误返回 None。
+        兼容 execute_tool 的两种错误形态：
+        - 顶层 {"error": ...}（异常捕获）
+        - {"result": {"error": ...}}（工具内部返回的错误）"""
+        if not isinstance(res, dict):
+            return None
+        if "error" in res:
+            return str(res["error"])
+        r = res.get("result")
+        if isinstance(r, dict) and "error" in r:
+            return str(r["error"])
+        return None
+
+    def _build_next_steps(self, plan_result: dict) -> tuple[list[dict], str]:
+        """决策轮生成下一步骤。
+
+        返回 (steps, mode)：
+        - mode="retry"：上一轮工具失败 → 修正重试（同一工具或 chatBI 串行链）
+        - mode="search_more"：上一轮成功但真缺信息 → 按上一轮工具类型补搜
+        - mode="exhausted"：重试预算耗尽 → 上层转为 terminate
+        """
+        suggested = plan_result.get("if_need_more", {})
+        queries = suggested.get("suggested_queries", [])
+        if not queries:
+            # LLM 说 need_more 但没给 query，兜底用原始 query
+            queries = [self.query]
+
+        outcomes = getattr(self, "_last_tool_outcomes", None) or []
+        # 找出失败的工具（ok=False 或结果含 error）
+        failed = [
+            (s, res) for s, ok, res in outcomes
+            if not ok or self._extract_tool_error(res) is not None
+        ]
+        if failed:
+            s, res = failed[0]
+            tool_name = s.get("tool", "search")
+            err = self._extract_tool_error(res) or "未知错误"
+            # 兜底初始化重试计数（手动重试路径不经过 run()，可能未初始化）
+            retry_counts = getattr(self, "_tool_retry_counts", None)
+            if retry_counts is None:
+                retry_counts = self._tool_retry_counts = {}
+            retry_count = retry_counts.get(tool_name, 0) + 1
+            retry_counts[tool_name] = retry_count
+            if retry_count > _MAX_AUTO_RETRY:
+                self._retry_exhausted_reason = (
+                    f"工具 {tool_name} 已自动修正重试 {_MAX_AUTO_RETRY} 次仍失败"
+                    f"（最后一次错误：{err[:200]}），已停止尝试。"
+                )
+                return [], "exhausted"
+            # chatBI 串行链失败（exec_sql/plot）：重放 gen_sql→exec_sql→plot，
+            # 把错误信息拼进 gen_sql 的 query，让 LLM 重新生成修正后的 SQL
+            if tool_name in ("exec_sql", "plot"):
+                steps = [
+                    {"tool": "gen_sql",
+                     "description": f"重新生成SQL（第{retry_count}次修正，上次错误：{err[:200]}）",
+                     "params": {"query": f"{self.query}。注意：上次生成的SQL执行失败：{err[:200]}，请修正"}},
+                    {"tool": "exec_sql", "description": "执行重新生成的SQL", "params": {}},
+                    {"tool": "plot", "description": "可视化查询结果", "params": {"type": "auto", "title": ""}},
+                ]
+                return steps, "retry"
+            # 其他工具失败：同一工具修正重试（保留原参数，错误信息进 description）
+            params = dict(s.get("params", {}))
+            step = {
+                "tool": tool_name,
+                "description": f"修正重试（第{retry_count}次，上次错误：{err[:200]}）",
+                "params": params,
+            }
+            return [step], "retry"
+
+        # 上一轮全部成功但决策仍 need_more → 真缺信息，按上一轮工具类型补搜
+        # （知识库问题补 rag_retrieve，数据问题补 gen_sql，实时问题才 search）
+        prev_tools = [s.get("tool") for s, _, _ in outcomes]
+        base_tool = "search"
+        for t in prev_tools:
+            if t in ("rag_retrieve", "gen_sql"):
+                base_tool = t
+                break
+        steps = []
+        for q in queries:
+            if base_tool == "gen_sql":
+                steps.append({"tool": "gen_sql", "description": q, "params": {"query": q}})
+            elif base_tool == "rag_retrieve":
+                steps.append({"tool": "rag_retrieve", "description": q, "params": {"query": q}})
+            else:
+                steps.append({"tool": "search", "description": q, "params": {"query": q}})
+        return steps, "search_more"
 
     # ── 截断重放 ──
 
@@ -1630,6 +1760,8 @@ class ReactLoop:
 
         self._last_raw_results = []
         self._last_tc_node_ids = []
+        # 手动重试路径也记录执行结果，保证后续决策轮能识别失败（与主循环一致）
+        self._last_tool_outcomes = []
 
         for node_data in new_nodes:
             tool_name = node_data.get("data", {}).get("tool", "search")
@@ -1674,6 +1806,7 @@ class ReactLoop:
 
             self._last_raw_results.append(tool_result)
             self._last_tc_node_ids.append(tc_node.id)
+            self._last_tool_outcomes.append(({"tool": tool_name, "params": params}, success, tool_result))
 
         # ── 4.5 存活兄弟节点并入新评估 ──
         # 同一步未被中断的 done 工具：它们的结果因原评估被打断从未被评估过，

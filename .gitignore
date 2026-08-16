@@ -25,3 +25,6 @@ backend/data/*.db
 # Moderation fine-tuning artifacts (large files)
 backend/moderation/output/
 backend/moderation/data/
+
+# 运行时日志不入库
+*.log
