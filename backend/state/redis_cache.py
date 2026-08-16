@@ -273,6 +273,23 @@ def find_reusable(query: str, threshold: float = None) -> dict:
         if best_sim >= threshold and best_payload is not None:
             graph = load(best_run)
             if graph.get("nodes"):
+                # 命中复用也是一笔真实交互 → 落 runs + events（不覆盖原始推理记录）
+                try:
+                    from admin.persistence import save_reuse_run, save_event
+                    save_reuse_run(
+                        query=query,
+                        reused_from=best_run,
+                        similarity=round(best_sim, 4),
+                        conversation_id="",
+                    )
+                    save_event(
+                        "reuse_hit",
+                        run_id=best_run,
+                        conversation_id="",
+                        detail=f"query={query} | cached_query={best_payload.get('query', '')} | similarity={round(best_sim, 4)}",
+                    )
+                except Exception as e:
+                    print(f"[redis-cache] reuse 落表失败（不影响复用）: {e}")
                 return {
                     "hit": True,
                     "similarity": round(best_sim, 4),

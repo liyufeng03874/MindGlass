@@ -56,7 +56,9 @@ CREATE TABLE IF NOT EXISTS runs (
     conversation_id TEXT,
     interrupted     INTEGER NOT NULL DEFAULT 0,
     safety_interrupt    INTEGER NOT NULL DEFAULT 0,
-    resumed         INTEGER NOT NULL DEFAULT 0
+    resumed         INTEGER NOT NULL DEFAULT 0,
+    reused          INTEGER NOT NULL DEFAULT 0,
+    reused_from     TEXT
 )
 """
 
@@ -98,6 +100,10 @@ def init_db():
             conn.execute("ALTER TABLE runs ADD COLUMN safety_interrupt INTEGER NOT NULL DEFAULT 0")
         if "resumed" not in cols:
             conn.execute("ALTER TABLE runs ADD COLUMN resumed INTEGER NOT NULL DEFAULT 0")
+        if "reused" not in cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN reused INTEGER NOT NULL DEFAULT 0")
+        if "reused_from" not in cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN reused_from TEXT")
         # events 表索引：按类型+时间查询
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at)")
@@ -224,6 +230,46 @@ def save_run(snapshot: dict) -> str:
     finally:
         conn.close()
 
+    return run_id
+
+
+def save_reuse_run(query: str, reused_from: str, similarity: float, conversation_id: str = "") -> str:
+    """缓存命中复用：插入一条轻量 run 记录（不覆盖原始推理记录）。
+
+    管理后台因此能看到每一笔真实交互（包括命中缓存的），
+    且通过 reused=1 + reused_from 能定位到复用自哪条原始推理，
+    结合 total_duration_ms 可直接判断哪些数据命中了缓存。
+    返回新生成的 run_id。
+    """
+    import uuid
+    run_id = f"reuse_{uuid.uuid4().hex[:12]}"
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """INSERT INTO runs (
+                run_id, query, created_at, final_answer, total_duration_ms,
+                conversation_id, reused, reused_from, snapshot
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+            (
+                run_id,
+                query,
+                datetime.now(_CN_TZ).isoformat(),
+                "",
+                0,
+                conversation_id,
+                reused_from,
+                json.dumps({
+                    "reuse": True,
+                    "similarity": round(similarity, 4),
+                    "reused_from": reused_from,
+                }, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[admin] save_reuse_run 失败: {e}")
+    finally:
+        conn.close()
     return run_id
 
 
@@ -399,7 +445,9 @@ def get_runs(limit: int = 20, offset: int = 0) -> dict:
             SELECT run_id, query, final_answer, total_nodes,
                    plan_count, toolcall_count, observe_count, answer_count,
                    total_duration_ms, degraded, tool_error_count, created_at,
-                   conversation_id, interrupted, safety_interrupt, resumed
+                   conversation_id, interrupted, safety_interrupt, resumed,
+                   reused, reused_from,
+                   reused, reused_from
             FROM runs
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -426,6 +474,10 @@ def get_runs(limit: int = 20, offset: int = 0) -> dict:
                 "interrupted": bool(r["interrupted"]),
                 "safety_interrupt": bool(r["safety_interrupt"]),
                 "resumed": bool(r["resumed"]),
+                "reused": bool(r["reused"]),
+                "reused_from": r["reused_from"],
+                "reused": bool(r["reused"]),
+                "reused_from": r["reused_from"],
             })
 
         return {"runs": runs, "total": total}

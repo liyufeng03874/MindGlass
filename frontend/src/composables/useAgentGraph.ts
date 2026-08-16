@@ -1,5 +1,5 @@
 import {ref} from 'vue'
-import type {AgentNode, ReasoningGraph, SSEEvent, LeftBlock, Round} from '@/types/agent'
+import type {AgentNode, AgentEdge, ReasoningGraph, SSEEvent, LeftBlock, Round} from '@/types/agent'
 
 // API 地址：生产环境通过 nginx 反代 /api，开发环境可覆盖 VITE_API_BASE_URL
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
@@ -8,7 +8,8 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 const STORAGE_RUN_ID = 'mindglass_run_id'
 const STORAGE_ROUNDS = 'mindglass_rounds'
 
-let pendingIdCounter = 0
+// 复用重放动画间隔（毫秒）：命中缓存时逐节点渲染的节奏，可调
+const REUSE_RENDER_INTERVAL_MS = 3000
 
 // ── Block 标题映射 ──
 const BLOCK_TITLES: Record<string, string> = {
@@ -170,6 +171,164 @@ export function useAgentGraph() {
     }
   }
 
+  /** 复用重放：逐节点渲染缓存命中的旧图，每节点带"进行中→完成"动画。
+   *  间隔由 REUSE_RENDER_INTERVAL_MS 控制（默认 3000ms），可调节。
+   *  模拟"跑通流程"的节奏感，避免一瞬出图让用户觉得是假数据。 */
+  async function replayReuseGraph(reuseGraph: ReasoningGraph, roundId: string): Promise<void> {
+    try {
+      const nodes = [...reuseGraph.nodes].sort((a, b) => (a.step_index ?? 0) - (b.step_index ?? 0))
+      const edges = reuseGraph.edges || []
+
+      // 重置图状态
+      graph.value = {
+        nodes: [],
+        edges: [],
+        branches: reuseGraph.branches || [],
+        meta: reuseGraph.meta || { current_step_index: 0, total_steps: 0, query: '', run_id: '' },
+      }
+
+      // 找到当前轮，清掉 placeholder
+      const round = rounds.value.find(r => r.id === roundId)
+      if (round) {
+        round.blocks = []
+        round.answer = ''
+      }
+
+      const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i]
+        const prev = i > 0 ? nodes[i - 1] : null
+
+        // 1) 节点先以 current 状态出现（显示"进行中"）
+        const displayedNode: AgentNode = { ...node, status: 'current' }
+        graph.value.nodes = [...graph.value.nodes, displayedNode]
+        if (prev) {
+          const edge = edges.find((e: any) => e.from === prev.id && e.to === node.id)
+          graph.value.edges = [...graph.value.edges, {
+            from: prev.id,
+            to: node.id,
+            type: (edge?.type as any) || 'Normal',
+          }]
+        }
+
+        // 2) 构建左侧 block（loading 状态）
+        const blockId = `block_${node.id}`
+        const block: LeftBlock = buildBlockFromNode(node, 'loading')
+        if (round) round.blocks.push(block)
+        saveRounds()
+
+        // 3) 短延迟 → 标记 done（"进行中→完成"的动画节奏）
+        await sleep(500)
+        const idx = graph.value.nodes.findIndex(n => n.id === node.id)
+        if (idx >= 0) {
+          const updated = [...graph.value.nodes]
+          updated[idx] = { ...updated[idx], status: 'done' }
+          graph.value.nodes = updated
+        }
+        const bIdx = round?.blocks.findIndex((b: LeftBlock) => b.id === blockId) ?? -1
+        if (bIdx >= 0 && round) {
+          round.blocks[bIdx] = { ...round.blocks[bIdx], status: 'done' }
+          saveRounds()
+        }
+
+        // 4) 如果还有下一个节点，加一个"下一步预测"占位（让用户知道接下来要跑什么）
+        if (i < nodes.length - 1) {
+          const nextType = nodes[i + 1].type
+          const pendingLabel =
+            nextType === 'Plan' ? '🧠 规划中...'
+            : nextType === 'ToolCall' ? '🔧 调用工具...'
+            : nextType === 'Observe' ? '🔍 评估中...'
+            : '💬 生成回答...'
+          const pendingId = `reuse_pending_${i}`
+          graph.value.nodes = [...graph.value.nodes, {
+            id: pendingId,
+            type: nextType,
+            status: 'pending',
+            step_index: node.step_index + 1,
+            data: { pending: true, label: pendingLabel },
+            label: pendingLabel,
+            branch_id: null,
+            duration_ms: null,
+          } as AgentNode]
+          graph.value.edges = [...graph.value.edges, {
+            from: node.id,
+            to: pendingId,
+            type: 'Pending',
+          }]
+
+          // 5) 等待渲染间隔，然后移除占位（下一个真实节点会替掉它）
+          await sleep(REUSE_RENDER_INTERVAL_MS)
+          graph.value.nodes = graph.value.nodes.filter(n => n.id !== pendingId)
+          graph.value.edges = graph.value.edges.filter((e: any) => e.from !== pendingId && e.to !== pendingId)
+        }
+      }
+
+      // 6) 最终答案填到当前轮
+      if (round) {
+        round.answer = finalAnswerOf(nodes)
+        saveRounds()
+      }
+    } catch (e) {
+      console.error('[replayReuseGraph] 重放异常:', e)
+    }
+  }
+
+  /** 从节点构建左侧 block（复用于重放动画） */
+  function buildBlockFromNode(node: AgentNode, initialStatus: LeftBlock['status']): LeftBlock {
+    const d = node.data || {}
+    const blockId = `block_${node.id}`
+    if (node.type === 'Plan') {
+      const output = typeof d.output === 'string' ? d.output : (typeof d.reasoning === 'string' ? d.reasoning : '')
+      return {
+        id: blockId,
+        nodeId: node.id,
+        type: 'plan',
+        status: initialStatus,
+        title: '🧠 规划',
+        content: output.slice(0, 500),
+      }
+    } else if (node.type === 'ToolCall') {
+      const toolName = d.tool || '未知'
+      return {
+        id: blockId,
+        nodeId: node.id,
+        type: 'toolcall',
+        status: initialStatus,
+        title: `🔧 调用工具: ${toolName}`,
+        content: '',
+        metadata: {
+          toolName,
+          params: d.params,
+          resultPreview: typeof d.result_preview === 'string' ? d.result_preview : '',
+          resultFull: typeof d.result_full === 'string' ? d.result_full : '',
+        },
+      }
+    } else if (node.type === 'Observe') {
+      const obs = d.observe_output
+      const summary = obs?.summary || (typeof d.summary === 'string' ? d.summary : '')
+      return {
+        id: blockId,
+        nodeId: node.id,
+        type: 'observe',
+        status: initialStatus,
+        title: '🔍 评估',
+        content: summary.slice(0, 500),
+      }
+    } else {
+      // Answer
+      const output = typeof d.output === 'string' ? d.output : ''
+      return {
+        id: blockId,
+        nodeId: node.id,
+        type: 'answer',
+        status: initialStatus,
+        title: '💬 最终回答',
+        content: output.slice(0, 2000),
+      }
+    }
+  }
+
   async function sendMessage(query: string) {
     // 先立刻显示用户气泡 + 助手"规划中"占位，不让用户以为卡了
     roundCounter++
@@ -179,19 +338,21 @@ export function useAgentGraph() {
     // ── 复用检查：语义相似的已缓存思维图直接渲染，不重跑 ──
     const reuse = await checkReuse(query)
     if (reuse && reuse.graph?.nodes?.length) {
-      // 命中复用，更新已 push 的轮次
-      const r = rounds.value.find(r => r.id === currentRoundId)
-      if (r) r.answer = finalAnswerOf(reuse.graph.nodes)
-      graph.value = reuse.graph as ReasoningGraph
+      // 命中复用：逐节点重放（让用户感觉是跑通流程），不一瞬出图
       if (!conversationId) {
         conversationId = `conv_${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`
         try { localStorage.setItem(STORAGE_CONV_ID, conversationId) } catch (e) { /* 静默 */ }
       }
       connected.value = true
+      isRunning.value = true
       status.value = `♻️ 命中相似问题缓存（相似度 ${reuse.similarity}），复用已有思维图`
+      
+      await replayReuseGraph(reuse.graph, currentRoundId)
+      
       // 复用命中 = 推理已完成，清 pending 标记 + 保存最终 rounds
       clearRunId()
       saveRounds()
+      isRunning.value = false
       return
     }
 

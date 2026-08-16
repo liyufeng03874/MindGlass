@@ -39,13 +39,16 @@ export function useReasoningGraph(
     const rowSpacing = 320  // 同 step 多节点（非并行）行间距
     const nodes: Node[] = []
     const activeNodes = graph.value.nodes.filter(n => n.status !== 'discarded')
+    // pending 节点不参与布局竞争，单独处理（总是在父节点正下方）
+    const pendingNodes = activeNodes.filter(n => n.status === 'pending')
+    const layoutNodes = activeNodes.filter(n => n.status !== 'pending')
 
     // 找到分叉点
-    const firstBranchStep = activeNodes.find(n => n.status === 'branch')?.step_index
+    const firstBranchStep = layoutNodes.find(n => n.status === 'branch')?.step_index
 
     // 检测并行组：同 step_index + 同 parallel_group_id 的 ToolCall 节点
     const parallelGroups = new Map<string, AgentNode[]>()
-    activeNodes.forEach(node => {
+    layoutNodes.forEach(node => {
       const pgId = node.data?.parallel_group_id
       if (pgId) {
         if (!parallelGroups.has(pgId)) parallelGroups.set(pgId, [])
@@ -69,14 +72,14 @@ export function useReasoningGraph(
 
     // 按 step_index 分组，处理同 step 多节点（Observe/Answer 等）
     const stepGroups = new Map<number, AgentNode[]>()
-    activeNodes.forEach(node => {
+    layoutNodes.forEach(node => {
       if (!stepGroups.has(node.step_index)) stepGroups.set(node.step_index, [])
       stepGroups.get(node.step_index)!.push(node)
     })
 
-    activeNodes.forEach((node) => {
+    layoutNodes.forEach((node) => {
       const colorScheme = NODE_COLORS[node.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: node.type }
-      const isPending = node.status === 'pending'
+      const isPending = false  // layoutNodes 不含 pending
       const isBranch = node.status === 'branch'
       const isReplaced = node.status === 'replaced'
       const isDeprecated = isBranch || isReplaced
@@ -213,6 +216,57 @@ export function useReasoningGraph(
         })
       }
 
+      nodes.push(flowNode)
+    })
+
+    // 单独处理 pending 节点：找到所有父节点，放在它们平均位置的正下方
+    pendingNodes.forEach(pendingNode => {
+      const colorScheme = NODE_COLORS[pendingNode.type] || { bg: '#f0f0f0', border: '#d9d9d9', label: pendingNode.type }
+      // 找到所有指向这个 pending 节点的边的来源节点
+      const parentEdges = graph.value?.edges.filter(e => e.to === pendingNode.id) || []
+      const parentFlowNodes = parentEdges
+        .map(e => graph.value?.nodes.find(n => n.id === e.from))
+        .map(n => n ? nodes.find(fn => fn.id === n.id) : null)
+        .filter((n): n is Node => n !== null)
+      
+      // 如果找到父节点，放在父节点平均位置的正下方
+      let xPosition = centerX - 100
+      let yPosition = pendingNode.step_index * spacingY
+      if (parentFlowNodes.length > 0) {
+        // 多个父节点（并行）：取平均 x 位置
+        xPosition = parentFlowNodes.reduce((sum, n) => sum + n.position.x, 0) / parentFlowNodes.length
+        // y 位置取父节点里最下的那个 + spacingY
+        const maxParentY = Math.max(...parentFlowNodes.map(n => n.position.y))
+        yPosition = maxParentY + spacingY
+      }
+
+      const flowNode: Node = {
+        id: pendingNode.id,
+        position: { x: xPosition, y: yPosition },
+        data: {
+          label: pendingNode.label,
+          type: pendingNode.type,
+          status: pendingNode.status,
+          data: pendingNode.data,
+          color: colorScheme,
+          isBranch: false,
+          isReplaced: false,
+          isParallel: false,
+          isDegraded: false,
+          isDeprecated: false,
+        },
+        style: {
+          background: 'rgba(10,14,31,0.5)',
+          backdropFilter: 'blur(8px)',
+          border: `1.5px dashed ${colorScheme.border}`,
+          borderRadius: '8px',
+          padding: '12px',
+          minWidth: '200px',
+          color: '#e6e9f5',
+          opacity: 0.6,
+          boxShadow: `0 0 6px ${colorScheme.border}40`,
+        },
+      }
       nodes.push(flowNode)
     })
 
