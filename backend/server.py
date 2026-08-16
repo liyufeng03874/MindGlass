@@ -2,6 +2,7 @@
 
 import os
 import json
+import asyncio
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,6 +61,29 @@ _store.set_change_listener(_redis_change_listener)
 
 # 当前活跃的 ReactLoop 实例（打断端点用；单 store 天然只有一个活跃 run）
 _active_loop: Optional[ReactLoop] = None
+
+# 并发互斥锁：run/resume/retry 共用一个 _store，同一时刻只允许一个推理写入节点，
+# 否则两个 loop 同时往 store 加节点 → 图叠加错乱（偶发乱图的根因）
+_agent_lock = asyncio.Lock()
+
+
+async def _try_acquire_agent() -> bool:
+    """非阻塞尝试获取推理锁；拿不到说明已有推理在跑，返回 False（前端应等/放弃）"""
+    if _agent_lock.locked():
+        return False
+    try:
+        await asyncio.wait_for(_agent_lock.acquire(), timeout=0.1)
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
+def _release_agent():
+    if _agent_lock.locked():
+        try:
+            _agent_lock.release()
+        except RuntimeError:
+            pass
 
 
 @app.get("/api/health")
@@ -120,12 +144,17 @@ async def run_agent(request: dict):
     async def event_stream():
         """SSE 事件流，run 完成后自动落盘快照"""
         global _active_loop
+        if not await _try_acquire_agent():
+            yield json.dumps({"type": "error", "message": "已有推理在运行，请稍后重试"}, ensure_ascii=False)
+            yield "\n\n"
+            return
         _active_loop = loop
         try:
             async for event in loop.run(query, history_msgs, conversation_id):
                 yield event
         finally:
             _active_loop = None
+            _release_agent()
             # SSE 流结束 → run 已完成（或被用户打断）→ 保存快照
             try:
                 snapshot = _store.to_dict()
@@ -168,10 +197,15 @@ def retry_from(request: dict):
     loop = ReactLoop(_store)
 
     async def event_stream():
+        if not await _try_acquire_agent():
+            yield json.dumps({"type": "error", "message": "已有推理在运行，请稍后重试"}, ensure_ascii=False)
+            yield "\n\n"
+            return
         try:
             async for event in loop.retry_from(step_index, edited_data):
                 yield event
         finally:
+            _release_agent()
             # 重试也落盘（upsert 同 run_id），admin 思维重现才能看到重试分支
             try:
                 snapshot = _store.to_dict()
@@ -209,10 +243,15 @@ async def retry_from_graph(request: dict):
     loop = ReactLoop(_store)
 
     async def event_stream():
+        if not await _try_acquire_agent():
+            yield json.dumps({"type": "error", "message": "已有推理在运行，请稍后重试"}, ensure_ascii=False)
+            yield "\n\n"
+            return
         try:
             async for event in loop.retry_from_graph(step_index, old_nodes, new_nodes, query, plan_info):
                 yield event
         finally:
+            _release_agent()
             try:
                 snapshot = _store.to_dict()
                 if snapshot.get("nodes"):
@@ -249,12 +288,17 @@ async def resume_agent():
 
     async def event_stream():
         global _active_loop
+        if not await _try_acquire_agent():
+            yield json.dumps({"type": "error", "message": "已有推理在运行，请稍后重试"}, ensure_ascii=False)
+            yield "\n\n"
+            return
         _active_loop = loop
         try:
             async for event in loop.resume():
                 yield event
         finally:
             _active_loop = None
+            _release_agent()
             try:
                 snapshot = _store.to_dict()
                 if snapshot.get("nodes"):
