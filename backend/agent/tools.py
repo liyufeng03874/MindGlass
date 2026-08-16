@@ -423,23 +423,24 @@ def _infer_chart_type(columns: list[str], rows: list[dict]) -> str:
     if not rows or not columns:
         return "bar"
     n_cols = len(columns)
-    n_rows = len(rows)
 
-    # 两列：一维分类 + 一维数值 → pie（少量）或 bar
+    # 趋势优先：任一列名含时间/日期/趋势词 → 折线图（即使行数少）
+    trend_keywords = ["date", "time", "month", "year", "quarter", "week", "hour",
+                      "日期", "时间", "月", "年", "季度", "周", "时", "趋势", "走势", "trend"]
+    for col in columns:
+        cl = str(col).lower()
+        if any(kw in cl for kw in trend_keywords):
+            return "line"
+
+    # 两列：仅占比/份额语义 → 饼图；其余（排名/对比/少量分类）→ 柱状图
     if n_cols == 2:
         is_numeric_second = all(_is_number(r.get(columns[1])) for r in rows[:20] if r.get(columns[1]) is not None)
         if is_numeric_second:
             metric_name = str(columns[1]).lower()
             share_hint = any(k in metric_name for k in ("占比", "比例", "份额", "share", "ratio", "rate", "percent", "pct"))
-            if share_hint or n_rows <= 6:
+            if share_hint:
                 return "pie"
         return "bar"
-
-    # 含日期/时间列 → line
-    date_keywords = ["date", "time", "month", "year", "day", "日期", "时间", "月", "年"]
-    for col in columns:
-        if any(kw in col.lower() for kw in date_keywords):
-            return "line"
 
     # 默认柱状图
     return "bar"

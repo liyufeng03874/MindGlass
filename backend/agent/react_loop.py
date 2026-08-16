@@ -1336,6 +1336,17 @@ class ReactLoop:
             return str(r["error"])
         return None
 
+    def _original_plot_params(self) -> dict:
+        """从首个 Plan 节点步骤中提取原始 plot 参数（type/title），供重试链复用。
+        避免重试时把 Planner 明确指定的图表类型（如 line）丢失成 auto。"""
+        for node in self.store.nodes:
+            if node.type == "Plan" and node.data and node.data.get("plan_count") == 1:
+                for step in node.data.get("steps", []):
+                    if step.get("tool") == "plot":
+                        p = step.get("params", {}) or {}
+                        return {"type": p.get("type", "auto"), "title": p.get("title", "")}
+        return {"type": "auto", "title": ""}
+
     def _build_next_steps(self, plan_result: dict) -> tuple[list[dict], str]:
         """决策轮生成下一步骤。
 
@@ -1373,14 +1384,16 @@ class ReactLoop:
                 )
                 return [], "exhausted"
             # chatBI 串行链失败（exec_sql/plot）：重放 gen_sql→exec_sql→plot，
-            # 把错误信息拼进 gen_sql 的 query，让 LLM 重新生成修正后的 SQL
+            # 把错误信息拼进 gen_sql 的 query，让 LLM 重新生成修正后的 SQL；
+            # plot 参数继承 Planner 原始 type/title，避免趋势被降级成 auto
             if tool_name in ("exec_sql", "plot"):
+                plot_params = self._original_plot_params()
                 steps = [
                     {"tool": "gen_sql",
                      "description": f"重新生成SQL（第{retry_count}次修正，上次错误：{err[:200]}）",
                      "params": {"query": f"{self.query}。注意：上次生成的SQL执行失败：{err[:200]}，请修正"}},
                     {"tool": "exec_sql", "description": "执行重新生成的SQL", "params": {}},
-                    {"tool": "plot", "description": "可视化查询结果", "params": {"type": "auto", "title": ""}},
+                    {"tool": "plot", "description": "可视化查询结果", "params": plot_params},
                 ]
                 return steps, "retry"
             # 其他工具失败：同一工具修正重试（保留原参数，错误信息进 description）
