@@ -607,15 +607,26 @@ def _build_echarts_option(columns: list[str], rows: list[dict], chart_type: str,
 # ── Redis 辅助（轻量封装，不依赖 redis_cache.py 的主流程逻辑）──
 
 _redis_pool = None
+_redis_warned = False
 
 async def _get_redis():
-    """获取 Redis 连接（懒初始化）"""
-    global _redis_pool
+    """获取 Redis 连接（懒初始化）
+    注意：redis-py 新版默认 RESP3(HELLO)，旧版 Redis(<6) 不支持 -> 必须显式 protocol=2
+    否则连接建立失败，所有 get/set 静默降级，缓存形同虚设。"""
+    global _redis_pool, _redis_warned
     if _redis_pool is None:
         try:
             import redis.asyncio as aioredis
-            _redis_pool = aioredis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+            _redis_pool = aioredis.Redis(
+                host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB,
+                decode_responses=True, protocol=2,
+            )
+            await _redis_pool.ping()
         except Exception:
+            _redis_pool = None
+            if not _redis_warned:
+                _redis_warned = True
+                print(f"[tools] Redis cache unavailable ({REDIS_HOST}:{REDIS_PORT}), degrade to direct DB")
             return None
     return _redis_pool
 
