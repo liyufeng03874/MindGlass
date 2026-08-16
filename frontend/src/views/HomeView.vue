@@ -44,42 +44,52 @@
       </div>
     </header>
 
-    <main class="main-content" :class="{ 'show-graph': showGraph && isMobile }">
-      <!-- 场景选择层：未开始对话时显示，点击问题直接发起推理 -->
-      <div v-if="!hasNodes" class="scene-selector">
-        <div class="scene-head">
-          <div class="scene-title">选择场景开始探索</div>
-          <div class="scene-sub">思镜会根据问题类型自动调度 知识库检索 / 数据库分析 / 网络搜索</div>
+    <main class="main-content" :class="{ 'show-graph': showGraph && isMobile, landing: !entered }">
+      <!-- 入场页：未进入对话时显示（empty-state + 场景选择 + 直接输入） -->
+      <div v-if="!entered" class="landing-overlay">
+        <div class="landing-empty">
+          <div class="empty-icon"><MirrorIcon :size="72" /></div>
+          <p class="empty-title">投一个问题，看思绪成形</p>
+          <p class="empty-sub">推理过程将如星河般在你眼前生长</p>
         </div>
-        <div class="scene-cards">
-          <div
-            v-for="sc in scenes"
-            :key="sc.id"
-            class="scene-card"
-            :class="sc.id"
-          >
-            <div class="scene-card-head">
-              <span class="scene-emoji">{{ sc.emoji }}</span>
-              <span class="scene-name">{{ sc.name }}</span>
-            </div>
-            <div class="scene-desc">{{ sc.desc }}</div>
-            <div class="scene-questions">
-              <button
-                v-for="(q, qi) in sc.questions"
-                :key="qi"
-                class="scene-question"
-                :style="{ animationDelay: (qi * 0.4) + 's' }"
-                @click="onSceneQuestion(q)"
-              >
-                <span class="q-icon">›</span>
-                <span class="q-text">{{ q }}</span>
-              </button>
+        <div class="scene-selector">
+          <div class="scene-head">
+            <div class="scene-title">选择场景开始探索</div>
+            <div class="scene-sub">思镜会根据问题类型自动调度 知识库检索 / 数据库分析 / 网络搜索</div>
+          </div>
+          <div class="scene-cards">
+            <div
+              v-for="sc in scenes"
+              :key="sc.id"
+              class="scene-card"
+              :class="sc.id"
+            >
+              <div class="scene-card-head">
+                <span class="scene-emoji">{{ sc.emoji }}</span>
+                <span class="scene-name">{{ sc.name }}</span>
+              </div>
+              <div class="scene-desc">{{ sc.desc }}</div>
+              <div class="scene-questions">
+                <button
+                  v-for="(q, qi) in sc.questions"
+                  :key="qi"
+                  class="scene-question"
+                  :style="{ animationDelay: (qi * 0.4) + 's' }"
+                  @click="onSceneQuestion(q)"
+                >
+                  <span class="q-icon">›</span>
+                  <span class="q-text">{{ q }}</span>
+                </button>
+              </div>
             </div>
           </div>
+          <button class="direct-input-btn" @click="onDirectEnter">
+            不选场景，直接输入 <span class="direct-arrow">→</span>
+          </button>
         </div>
       </div>
 
-      <div :class="['left-panel', { full: !showGraph || isMobile }]">
+      <div :class="['left-panel', { 'chat-mode': entered, full: !showGraph || isMobile }]">
         <ChatPanel
           ref="chatPanelRef"
           :rounds="rounds"
@@ -263,8 +273,21 @@ const scenes = ref<Scene[]>([
   },
 ])
 
+// 是否已进入对话（true=正常左右布局，false=入场页）。
+// 进入方式：选场景问题 / 直接输入。清空后回到入场页。
+const entered = ref(false)
+
 function onSceneQuestion(q: string) {
+  entered.value = true
   onSend(q)
+}
+
+/** 直接输入入口：不选场景，进入正常聊天态（rounds 空 → 开场白 + 输入框自然出现） */
+function onDirectEnter() {
+  entered.value = true
+  if (!showGraph.value) {
+    showGraph.value = true
+  }
 }
 
 function onRetry(stepIndex: number, originalNode: any, editedData: Record<string, any>) {
@@ -346,6 +369,8 @@ function clearDemo() {
   totalElapsed.value = null
   status.value = '就绪'
   clearCut()
+  // 清空后回到入场页（完整闭环）
+  entered.value = false
 }
 </script>
 
@@ -353,8 +378,8 @@ function clearDemo() {
 /* 思镜 · 首页暗色玻璃主题（水镜 v2.1 第一遍）
    面板为半透明玻璃，右侧镜台全透——深空星野即水面 */
 
-/* ── 场景选择层（进入页面先选场景）── */
-.scene-selector {
+/* ── 入场页（选择场景）── */
+.landing-overlay {
   position: absolute;
   inset: 0;
   z-index: 3;
@@ -362,37 +387,82 @@ function clearDemo() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 32px 24px;
   overflow-y: auto;
   pointer-events: auto;
+  background: transparent; /* 全透：深空星野即入场页背景 */
+}
+
+/* empty-state 放大版（原在 ReasoningGraph 内，此处提到入场页顶部） */
+.landing-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 36px;
+  animation: scene-fade-in 0.7s ease both;
+}
+
+.landing-empty .empty-icon {
+  color: var(--accent);
+  filter: drop-shadow(0 0 24px rgba(167, 139, 250, 0.6));
+  margin-bottom: 18px;
+  animation: landing-float 4s ease-in-out infinite;
+}
+
+.landing-empty .empty-title {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-h);
+  letter-spacing: 2px;
+}
+
+.landing-empty .empty-sub {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+@keyframes landing-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.scene-selector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 1080px;
+  animation: scene-fade-in 0.7s ease both;
+  animation-delay: 0.1s;
 }
 
 .scene-head {
   text-align: center;
   margin-bottom: 28px;
-  animation: scene-fade-in 0.6s ease both;
 }
 
 .scene-title {
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 600;
   color: var(--text-h);
-  letter-spacing: 1px;
+  letter-spacing: 2px;
   text-shadow: 0 0 20px rgba(167, 139, 250, 0.35);
 }
 
 .scene-sub {
-  margin-top: 8px;
-  font-size: 13px;
+  margin-top: 10px;
+  font-size: 14px;
   color: var(--text-dim);
 }
 
 .scene-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  gap: 24px;
   width: 100%;
-  max-width: 980px;
+  max-width: 1080px;
 }
 
 .scene-card {
@@ -400,20 +470,47 @@ function clearDemo() {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  padding: 20px 18px;
+  border-radius: 18px;
+  padding: 26px 22px;
   transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
   animation: scene-card-in 0.6s ease both;
 }
 
-.scene-card:nth-child(1) { animation-delay: 0.05s; }
-.scene-card:nth-child(2) { animation-delay: 0.15s; }
-.scene-card:nth-child(3) { animation-delay: 0.25s; }
+.scene-card:nth-child(1) { animation-delay: 0.15s; }
+.scene-card:nth-child(2) { animation-delay: 0.25s; }
+.scene-card:nth-child(3) { animation-delay: 0.35s; }
 
 .scene-card:hover {
   transform: translateY(-3px);
   border-color: var(--accent);
   box-shadow: 0 8px 30px rgba(167, 139, 250, 0.15);
+}
+
+/* 直接输入入口：低调次级按钮，三卡下方居中 */
+.direct-input-btn {
+  margin-top: 32px;
+  padding: 12px 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  animation: scene-fade-in 0.7s ease both;
+  animation-delay: 0.5s;
+}
+
+.direct-input-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-h);
+  background: rgba(167, 139, 250, 0.1);
+  transform: translateY(-1px);
+}
+
+.direct-arrow {
+  color: var(--accent);
+  margin-left: 4px;
 }
 
 .scene-card-head {
@@ -424,11 +521,11 @@ function clearDemo() {
 }
 
 .scene-emoji {
-  font-size: 20px;
+  font-size: 26px;
 }
 
 .scene-name {
-  font-size: 16px;
+  font-size: 19px;
   font-weight: 600;
   color: var(--text-h);
 }
@@ -438,28 +535,28 @@ function clearDemo() {
 .scene-card.general .scene-name { color: #34d399; }
 
 .scene-desc {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .scene-questions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 /* 问题气泡：半透明胶囊 + 上下浮动 */
 .scene-question {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 12px;
+  gap: 10px;
+  padding: 13px 18px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
@@ -475,7 +572,7 @@ function clearDemo() {
 
 .q-icon {
   color: var(--accent);
-  font-size: 14px;
+  font-size: 16px;
   flex-shrink: 0;
 }
 
@@ -686,13 +783,27 @@ function clearDemo() {
   position: relative;
 }
 
-/* 左翼聊天：半透明玻璃，星空隐约透出（不加 backdrop-blur，以免抹平星点） */
+/* 左翼聊天：半透明玻璃，星空隐约透出（不加 backdrop-blur，以免抹平星点）
+   入场态（未进入对话）背景透明、无分割线，与右侧星野视觉统一；
+   进入对话（chat-mode）后背景平滑渐变回半透明深色 + 分割线出现 */
 .left-panel {
   width: 50%;
   min-width: 320px;
-  border-right: 1px solid var(--panel-border);
+  border-right: 1px solid transparent;
+  background: transparent;
+  transition: width 0.3s ease, background 0.6s ease, border-color 0.6s ease;
+}
+
+.left-panel.chat-mode {
   background: rgba(10, 14, 31, 0.5);
-  transition: width 0.3s ease;
+  border-right: 1px solid var(--panel-border);
+}
+
+/* 入场态：ChatPanel 自带的相位左边框/阴影也隐藏，避免露出第二条分割线 */
+.left-panel:not(.chat-mode) .chat-panel {
+  border-right-color: transparent;
+  box-shadow: none;
+  transition: border-color 0.6s ease, box-shadow 0.6s ease;
 }
 
 @media (max-width: 768px) {
