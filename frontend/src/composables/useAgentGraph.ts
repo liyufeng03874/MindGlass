@@ -257,16 +257,20 @@ export function useAgentGraph() {
       const decoder = new TextDecoder()
       let buffer = ''
 
+      // SSE 读取超时（毫秒）：法镜 RAG 在 ECS 上单次要 40-60s，加上 LLM 决策/观察，一轮可能超 120s。
+      // 60s 太短会把“慢”误判成“断连”，触发自动重连 + resume 叠加乱图。放宽到 180s。
+      const SSE_TIMEOUT_MS = 180000
+
       while (true) {
-        // 60s 超时：没收到数据就标记断连
+        // 超时：没收到数据就标记断连
         const readPromise = reader.read()
         const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
-          setTimeout(() => resolve({ timedOut: true }), 60000)
+          setTimeout(() => resolve({ timedOut: true }), SSE_TIMEOUT_MS)
         )
         const result = await Promise.race([readPromise, timeoutPromise])
 
         if ('timedOut' in result) {
-          // 60 秒没数据 → SSE 断连
+          // 超时 → SSE 断连
           // 关键：保留本地图（含 pending 预测节点），不拉 Redis 覆盖
           connected.value = false
           isRunning.value = false
@@ -1147,7 +1151,8 @@ export function useAgentGraph() {
           while (true) {
             const readPromise = reader.read()
             const timeoutPromise = new Promise<{ timedOut: true }>((resolve) =>
-              setTimeout(() => resolve({ timedOut: true }), 60000)
+              // resume 也在跑同样的 RAG/LLM 链路，同样需要 180s 超时
+              setTimeout(() => resolve({ timedOut: true }), SSE_TIMEOUT_MS)
             )
             const result = await Promise.race([readPromise, timeoutPromise])
 
