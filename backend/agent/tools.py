@@ -224,7 +224,7 @@ async def tool_gen_sql(query: str, schema_hint: str = "") -> dict:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.1,
+            temperature=0.0,
             max_tokens=1024,
         )
         sql_text = resp.choices[0].message.content.strip()

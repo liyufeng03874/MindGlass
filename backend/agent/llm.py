@@ -18,7 +18,7 @@ client = OpenAI(
 )
 
 
-def generate(prompt: str, system_prompt: str = "", model: str = None, temperature: float = 0.3) -> str:
+def generate(prompt: str, system_prompt: str = "", model: str = None, temperature: float = 0.0) -> str:
     """调用 LLM 生成回答（完整返回）"""
     model_name = model or LLM_MODEL
     messages = []
@@ -35,7 +35,7 @@ def generate(prompt: str, system_prompt: str = "", model: str = None, temperatur
     return resp.choices[0].message.content or ""
 
 
-def generate_stream(prompt: str, system_prompt: str = "", model: str = None, temperature: float = 0.3) -> Generator[str, None, str]:
+def generate_stream(prompt: str, system_prompt: str = "", model: str = None, temperature: float = 0.0) -> Generator[str, None, str]:
     """流式调用 LLM"""
     model_name = model or LLM_MODEL
     messages = []

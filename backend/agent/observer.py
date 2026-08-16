@@ -144,7 +144,7 @@ async def _run_llm_stream(messages: list, stream_emit, node_id: str, node_type: 
     stream = client.chat.completions.create(
         model=LLM_MODEL,
         messages=messages,
-        temperature=0.3,
+        temperature=0.0,
         max_tokens=2048,
         stream=True,
     )

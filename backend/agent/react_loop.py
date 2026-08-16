@@ -211,7 +211,7 @@ class ReactLoop:
                 stream = client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=messages,
-                    temperature=0.3,
+                    temperature=0.0,
                     max_tokens=4096,
                     stream=True,
                 )
