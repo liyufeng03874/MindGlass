@@ -226,6 +226,8 @@ async def tool_gen_sql(query: str, schema_hint: str = "") -> dict:
             ],
             temperature=0.0,
             max_tokens=1024,
+            # 火山方舟思考开关：关闭深度思考，保证 SQL 生成稳定直出
+            extra_body={"thinking": {"type": "disabled"}},
         )
         sql_text = resp.choices[0].message.content.strip()
         # 清理 markdown 围栏

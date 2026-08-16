@@ -31,6 +31,9 @@ def generate(prompt: str, system_prompt: str = "", model: str = None, temperatur
         messages=messages,
         temperature=temperature,
         max_tokens=2048,
+        # 火山方舟思考开关：关闭深度思考（思考内容在 reasoning_content，默认代码读不到，
+        # 思考过长时 content 为空 -> 上层误判超时）
+        extra_body={"thinking": {"type": "disabled"}},
     )
     return resp.choices[0].message.content or ""
 
@@ -50,6 +53,8 @@ def generate_stream(prompt: str, system_prompt: str = "", model: str = None, tem
         temperature=temperature,
         max_tokens=2048,
         stream=True,
+        # 火山方舟思考开关：同上，关闭深度思考保证输出直出
+        extra_body={"thinking": {"type": "disabled"}},
     )
     for chunk in stream:
         if chunk.choices and chunk.choices[0].delta.content:

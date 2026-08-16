@@ -208,22 +208,39 @@ class ReactLoop:
         def _run_stream():
             """在线程中执行流式 LLM 调用，把 chunk 放入队列"""
             try:
+                import time as _t
+                _st = _t.time()
                 stream = client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=messages,
                     temperature=0.0,
                     max_tokens=4096,
                     stream=True,
+                    # 火山方舟 deepseek-v4-flash 默认开思考（reasoning_content），
+                    # 思考量随机、思考阶段 content 为空 -> observe 拿到空文本误判"评估超时"。
+                    # 演示需要确定性：显式关闭深度思考。
+                    extra_body={"thinking": {"type": "disabled"}},
                 )
                 ft = ""
+                _chunk_n = 0
                 for chunk in stream:
                     # 打断检查：线程内每收一个 chunk 检查一次，触发即停止入队
                     if self._is_interrupted():
                         break
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        token = chunk.choices[0].delta.content
+                    _chunk_n += 1
+                    # 兼容思考模型：content 可能为空、内容在 reasoning_content（deepseek 思考模式）
+                    token = ""
+                    if chunk.choices and chunk.choices[0].delta:
+                        d0 = chunk.choices[0].delta
+                        if getattr(d0, 'content', None):
+                            token = d0.content
+                        elif getattr(d0, 'reasoning_content', None):
+                            # 思考过程也算内容（否则 observe 拿到空 → 误判“评估超时”）
+                            token = d0.reasoning_content
+                    if token:
                         ft += token
                         q.put(("chunk", token, ft))
+                print(f"[llm] node={node_type} chunks={_chunk_n} took={_t.time()-_st:.1f}s content_len={len(ft)}")
                 q.put(("done", "", ft))
             except Exception as e:
                 import traceback
@@ -706,7 +723,10 @@ class ReactLoop:
             async for event in self._stream_llm(obs_node_id, "Observe", messages):
                 yield event
             full_text = self._last_stream_content or None
+            print(f"[observe] round={round_num} content_len={len(self._last_stream_content or '')}")
         except Exception:
+            import traceback
+            print(f"[observe] EXCEPTION round={round_num}: {traceback.format_exc()}")
             # 超时或其他异常，用原始结果生成简单摘要
             full_text = None
 
