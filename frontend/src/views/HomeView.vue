@@ -127,8 +127,8 @@
         </transition>
       </template>
 
-      <!-- 手机端底部导航栏 -->
-      <div v-if="isMobile" class="mobile-nav">
+      <!-- 手机端底部导航栏（仅进入对话后显示，入场页不显示） -->
+      <div v-if="isMobile && entered" class="mobile-nav">
         <button
           :class="['nav-btn', { active: !showGraph }]"
           @click="showGraph = false"
@@ -279,7 +279,7 @@ const scenes = ref<Scene[]>([
     name: '通用',
     emoji: '🌐',
     desc: '网络搜索 · 实时信息 / 新闻 / 对比',
-    questions: ['2026年AI开发岗位怎么样？', '成都、杭州、北京生活成本对比', '介绍一下Deepseek harness'],
+    questions: ['2026年AI开发岗位怎么样？', '成都、杭州、北京生活成本对比', '介绍一下最近新出的Deepseek Harness'],
   },
 ])
 
@@ -857,7 +857,6 @@ function clearDemo() {
   }
   .main-content > .left-panel {
     height: 50%;
-    padding-bottom: 56px;
   }
   /* 对话 tab：左面板撑满 */
   .main-content:not(.show-graph) > .left-panel {
