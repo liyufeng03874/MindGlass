@@ -11,6 +11,9 @@ const STORAGE_ROUNDS = 'mindglass_rounds'
 // 复用重放动画间隔（毫秒）：命中缓存时逐节点渲染的节奏，可调
 const REUSE_RENDER_INTERVAL_MS = 3000
 
+// 前端本地 pending “规划中...” 节点计数器（防刷新/误关后重复时 id 冲突）
+let pendingIdCounter = 0
+
 // ── Block 标题映射 ──
 const BLOCK_TITLES: Record<string, string> = {
   Plan: '🧠 正在规划...',
