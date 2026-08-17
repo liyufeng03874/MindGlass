@@ -249,6 +249,11 @@ def save_reuse_run(query: str, reused_from: str, similarity: float, conversation
     graph = graph or {}
     nodes = graph.get("nodes", []) or []
     total_nodes = len(nodes)
+    # 按类型统计各节点计数（Plan/ToolCall/Observe/Answer）
+    plan_count = sum(1 for n in nodes if n.get("type") == "Plan")
+    toolcall_count = sum(1 for n in nodes if n.get("type") == "ToolCall")
+    observe_count = sum(1 for n in nodes if n.get("type") == "Observe")
+    answer_count = sum(1 for n in nodes if n.get("type") == "Answer")
     answer = final_answer or ""
     # 从图里捞 answer 节点文本，final_answer 为空时兜底
     if not answer:
@@ -260,14 +265,19 @@ def save_reuse_run(query: str, reused_from: str, similarity: float, conversation
         conn.execute(
             """INSERT INTO runs (
                 run_id, query, created_at, final_answer, total_nodes,
+                plan_count, toolcall_count, observe_count, answer_count,
                 conversation_id, reused, reused_from, snapshot
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
             (
                 run_id,
                 query,
                 datetime.now(_CN_TZ).isoformat(),
                 answer,
                 total_nodes,
+                plan_count,
+                toolcall_count,
+                observe_count,
+                answer_count,
                 conversation_id,
                 reused_from,
                 json.dumps({
@@ -275,6 +285,10 @@ def save_reuse_run(query: str, reused_from: str, similarity: float, conversation
                     "similarity": round(similarity, 4),
                     "reused_from": reused_from,
                     "total_nodes": total_nodes,
+                    "plan_count": plan_count,
+                    "toolcall_count": toolcall_count,
+                    "observe_count": observe_count,
+                    "answer_count": answer_count,
                 }, ensure_ascii=False),
             ),
         )
