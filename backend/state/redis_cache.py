@@ -276,11 +276,18 @@ def find_reusable(query: str, threshold: float = None) -> dict:
                 # 命中复用也是一笔真实交互 → 落 runs + events（不覆盖原始推理记录）
                 try:
                     from admin.persistence import save_reuse_run, save_event
+                    # 从缓存图里捞原始 answer 文本（最后 Answer 节点）
+                    reuse_answer = ""
+                    for n in graph.get("nodes", []):
+                        if n.get("type") == "Answer" and n.get("data", {}).get("content"):
+                            reuse_answer = n["data"]["content"]
                     save_reuse_run(
                         query=query,
                         reused_from=best_run,
                         similarity=round(best_sim, 4),
                         conversation_id="",
+                        final_answer=reuse_answer,
+                        graph=graph,
                     )
                     save_event(
                         "reuse_hit",
@@ -290,6 +297,9 @@ def find_reusable(query: str, threshold: float = None) -> dict:
                     )
                 except Exception as e:
                     print(f"[redis-cache] reuse 落表失败（不影响复用）: {e}")
+                # 复用的 run 是历史图，时间戳要刷新为本次命中时刻，前端耗时才正确
+                import time as _time
+                graph.setdefault("meta", {})["run_started_at"] = _time.time()
                 return {
                     "hit": True,
                     "similarity": round(best_sim, 4),

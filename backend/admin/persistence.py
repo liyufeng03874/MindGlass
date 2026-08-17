@@ -233,35 +233,48 @@ def save_run(snapshot: dict) -> str:
     return run_id
 
 
-def save_reuse_run(query: str, reused_from: str, similarity: float, conversation_id: str = "") -> str:
+def save_reuse_run(query: str, reused_from: str, similarity: float, conversation_id: str = "",
+                   final_answer: str = "", graph: dict = None) -> str:
     """缓存命中复用：插入一条轻量 run 记录（不覆盖原始推理记录）。
 
     管理后台因此能看到每一笔真实交互（包括命中缓存的），
     且通过 reused=1 + reused_from 能定位到复用自哪条原始推理，
     结合 total_duration_ms 可直接判断哪些数据命中了缓存。
+    传入 final_answer + graph（原始 run 的答案与图节点）可让复用记录内容完整可查。
     返回新生成的 run_id。
     """
     import uuid
     run_id = f"reuse_{uuid.uuid4().hex[:12]}"
     conn = _get_conn()
+    graph = graph or {}
+    nodes = graph.get("nodes", []) or []
+    total_nodes = len(nodes)
+    answer = final_answer or ""
+    # 从图里捞 answer 节点文本，final_answer 为空时兜底
+    if not answer:
+        for n in nodes:
+            if n.get("type") == "Answer" and n.get("data", {}).get("content"):
+                answer = n["data"]["content"]
+                break
     try:
         conn.execute(
             """INSERT INTO runs (
-                run_id, query, created_at, final_answer, total_duration_ms,
+                run_id, query, created_at, final_answer, total_nodes,
                 conversation_id, reused, reused_from, snapshot
             ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
             (
                 run_id,
                 query,
                 datetime.now(_CN_TZ).isoformat(),
-                "",
-                0,
+                answer,
+                total_nodes,
                 conversation_id,
                 reused_from,
                 json.dumps({
                     "reuse": True,
                     "similarity": round(similarity, 4),
                     "reused_from": reused_from,
+                    "total_nodes": total_nodes,
                 }, ensure_ascii=False),
             ),
         )
