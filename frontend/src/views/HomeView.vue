@@ -9,21 +9,7 @@
         <span :class="['status-dot', { active: connected }]"></span>
         <span>{{ status || '就绪' }}</span>
         <template v-if="graph.nodes.length === 0">
-          <select
-            v-model="selectedDemo"
-            class="demo-select"
-            :disabled="loadingDemo"
-          >
-            <option value="" disabled>选择测试用例...</option>
-            <option v-for="d in demoList" :key="d.name" :value="d.name">{{ d.label }}</option>
-          </select>
-          <button
-            class="toggle-graph-btn"
-            @click="loadTestData(selectedDemo)"
-            :disabled="!selectedDemo || demoLoaded || loadingDemo"
-          >
-            {{ loadingDemo ? '⏳ 加载中...' : '📦 加载' }}
-          </button>
+          <!-- 静态数据加载下拉框已隐藏（2026-08-18）：现在有场景选择，不需要"选择测试用例+加载" -->
         </template>
         <template v-else>
           <button
@@ -413,7 +399,7 @@ function clearDemo() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 24px;
+  padding: 32px 24px 88px; /* 底部 88px 留白：防止"直接输入"按钮被底栏/屏幕截断 */
   overflow-y: auto;
   pointer-events: auto;
   background: transparent; /* 全透：深空星野即入场页背景 */
@@ -645,9 +631,33 @@ function clearDemo() {
 @media (max-width: 860px) {
   .scene-cards {
     grid-template-columns: 1fr;
+    width: 100%;
     max-width: 420px;
   }
   .scene-title { font-size: 20px; }
+}
+
+/* 窄屏（手机）适配：卡片宽度自适应，不溢出，内边距收窄 */
+@media (max-width: 480px) {
+  .scene-cards {
+    max-width: 100%;
+  }
+  .scene-card {
+    padding: 18px 16px;
+  }
+  .scene-title { font-size: 18px; }
+  .scene-head { margin-bottom: 20px; }
+  .scene-question {
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+  .direct-input-btn {
+    width: 100%;
+    max-width: 360px;
+    margin-top: 24px;
+    padding: 12px 20px;
+    font-size: 13px;
+  }
 }
 
 .mindglass {
@@ -679,24 +689,32 @@ function clearDemo() {
 
 @media (max-width: 768px) {
   .header {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 10px 16px;
+    flex-direction: row;
+    align-items: center;
+    padding: 8px 12px;
     gap: 8px;
+    flex-wrap: wrap;
   }
   .header h1 {
-    font-size: 17px;
+    font-size: 15px;
+    margin: 0;
   }
   .subtitle {
-    font-size: 11px;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 55vw;
   }
   .status-bar {
-    width: 100%;
+    margin-left: auto;
+    width: auto;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
+    font-size: 12px;
   }
   .admin-link {
-    margin-left: auto;
+    margin-left: 0;
     display: none;
   }
 }
@@ -740,29 +758,6 @@ function clearDemo() {
   background: var(--phase-tool);
   box-shadow: 0 0 8px var(--phase-tool);
   animation: pulse 1.5s infinite;
-}
-
-.demo-select {
-  padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--text-h);
-  min-width: 180px;
-  max-width: 280px;
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.2s;
-}
-
-.demo-select:focus {
-  border-color: var(--accent);
-}
-
-.demo-select option {
-  background: #1a1e3a;
-  color: #e6e9f5;
 }
 
 .toggle-graph-btn {
@@ -865,13 +860,14 @@ function clearDemo() {
   .main-content {
     flex-direction: column;
     position: relative;
+    padding-bottom: 56px; /* 给底部固定导航让位，避免内容被盖住 */
   }
   .main-content > .left-panel {
     height: 50%;
   }
-  /* 对话 tab：左面板撑满 */
+  /* 对话 tab：左面板撑满（减去顶部 header 与底部留白） */
   .main-content:not(.show-graph) > .left-panel {
-    height: calc(100% - 56px);
+    height: calc(100vh - 64px - 56px);
   }
   .main-content:not(.show-graph) > .right-panel {
     display: none;
@@ -879,6 +875,9 @@ function clearDemo() {
   .main-content > .right-panel {
     height: 50%;
     padding-bottom: 56px;
+  }
+  .main-content.show-graph > .right-panel {
+    height: calc(100vh - 64px - 56px);
   }
   /* 手机端：推理图全屏时隐藏聊天 */
   .main-content.show-graph > .left-panel {
